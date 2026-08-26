@@ -175,3 +175,27 @@ def test_demo_is_idempotent(cwd, capsys):
 
     assert fired[0] == fired[1] == fired[2]
     assert "liq_drain" in fired[0], "断崖式抽流动性每次都必须被检出"
+
+
+def test_prune_command_shrinks_the_database(cwd, capsys):
+    """Actions 用缓存带走数据库，体积失控会把 pip 缓存挤出仓库配额。"""
+    from chance_seeker.config import load_config
+    from chance_seeker.models import Entity, Observation, now_ts
+
+    config = load_config(cwd / "config" / "config.yaml", root=cwd)
+    with Database(config.db_path) as db:
+        key = "token:solana:abc"
+        db.upsert_entity(Entity(kind="token", key=key, chain="solana", address="abc"))
+        base = now_ts()
+        for metric in ("a", "b", "c"):
+            db.record(
+                [Observation(entity_key=key, metric=metric, value=float(i), ts=base + i) for i in range(2000)]
+            )
+        assert db.stats()["metrics"] == 6000
+
+    assert main(["prune", "--keep", "50", "--vacuum"]) == 0
+    out = capsys.readouterr().out
+    assert "清理了 5850 个指标点" in out
+
+    with Database(config.db_path) as db:
+        assert db.stats()["metrics"] == 150

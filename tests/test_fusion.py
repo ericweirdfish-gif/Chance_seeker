@@ -186,3 +186,21 @@ def test_mild_risk_does_not_veto(config, db):
     )
     assert 0 < mild.risk_penalty < float(config.score["risk_veto"])
     assert should_alert(config, db, mild)[0] is True
+
+
+def test_unknown_age_is_an_explicit_choice_not_a_silent_pass(config, db):
+    """拿不到上线时间时，min_age_minutes 不能静默失效。"""
+    entity = make_entity(db)
+    metrics = {"liquidity_usd": 300_000, "volume_24h": 900_000}  # 没有 age_minutes
+    assert config.filters["min_age_minutes"] > 0
+
+    config.filters["allow_unknown_age"] = True
+    assert passes_filters(config, entity, metrics)[0] is True
+
+    config.filters["allow_unknown_age"] = False
+    ok, reason = passes_filters(config, entity, metrics)
+    assert not ok and "上线时间未知" in reason
+
+    # 有年龄数据时，开关不影响正常判定
+    assert passes_filters(config, entity, {**metrics, "age_minutes": 600})[0] is True
+    assert passes_filters(config, entity, {**metrics, "age_minutes": 3})[0] is False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from chance_seeker.collectors.base import Collector, CollectResult, SchemaProbe
@@ -102,6 +103,10 @@ class GeckoTerminalCollector(Collector):
                 )
             )
 
+            # GeckoTerminal 的 pool_created_at 一定有，而 DexScreener 的部分接口
+            # 不返回 pairCreatedAt——这里补上，年龄过滤才不会因为数据源差异失效
+            age_minutes = _age_minutes(attrs.get("pool_created_at"), ts)
+
             volume = attrs.get("volume_usd") or {}
             txns = attrs.get("transactions") or {}
             h1 = txns.get("h1") or {}
@@ -115,6 +120,7 @@ class GeckoTerminalCollector(Collector):
                 "unique_buyers_1h": buyers,
                 "unique_sellers_1h": sellers,
                 "buyer_seller_ratio_1h": buyers / sellers if sellers > 0 else (buyers if buyers else None),
+                "age_minutes": age_minutes,
             }
             if endpoint == "trending_pools":
                 points["gt_trending"] = 1.0
@@ -133,6 +139,17 @@ def _base_token_address(pool: dict[str, Any], network: str) -> str | None:
         return None
     prefix = f"{network}_"
     return raw[len(prefix) :] if raw.startswith(prefix) else raw
+
+
+def _age_minutes(created_at: Any, now: int) -> float | None:
+    """把 ISO8601 的建池时间换算成分钟龄。"""
+    if not created_at:
+        return None
+    try:
+        created = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0.0, (now - created.timestamp()) / 60.0)
 
 
 def _num(value: Any) -> float:

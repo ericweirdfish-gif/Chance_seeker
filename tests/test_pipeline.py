@@ -169,3 +169,27 @@ def test_disabled_collectors_are_not_constructed(config, db, caplog):
         names = {c.name for c in build_collectors(config, db)}
     assert "x_attention" not in names
     assert not [r for r in caplog.records if "X_API_KEY" in r.getMessage()]
+
+
+def test_prune_counter_survives_process_restarts(config, db):
+    """`once` 模式每次都是新进程；计数器放内存里清理就永远不会触发。"""
+    from chance_seeker.models import Entity, Observation, now_ts
+
+    key = "token:solana:abc"
+    db.upsert_entity(Entity(kind="token", key=key, chain="solana", address="abc"))
+    base = now_ts()
+    db.record([Observation(entity_key=key, metric="v", value=float(i), ts=base + i) for i in range(200)])
+    config.general["series_retention_points"] = 10
+
+    # 模拟 Pipeline 被反复重建（每次 once 都是一个全新进程）
+    for _ in range(Pipeline.PRUNE_EVERY - 1):
+        pipe = Pipeline(config, db)
+        pipe.collectors, pipe.channels = [], []
+        pipe.tick(force=True)
+    assert len(db.series(key, "v", limit=500)) == 200, "还没到清理轮次"
+
+    pipe = Pipeline(config, db)
+    pipe.collectors, pipe.channels = [], []
+    pipe.tick(force=True)
+    assert len(db.series(key, "v", limit=500)) == 10, "第 20 轮必须触发清理"
+    assert db.kv_get("pipeline_ticks") == Pipeline.PRUNE_EVERY

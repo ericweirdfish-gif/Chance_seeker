@@ -72,7 +72,6 @@ class Pipeline:
         self.collectors = build_collectors(config, db)
         self.engine = AnomalyEngine(config, db)
         self.channels = build_channels(config)
-        self._ticks = 0
 
     # ------------------------------------------------------------------
     def tick(self, force: bool = False) -> TickReport:
@@ -105,12 +104,26 @@ class Pipeline:
             report.opportunities = self._detect(touched, report)
             report.alerted = self._dispatch(report.opportunities)
 
-        self._ticks += 1
-        if self._ticks % 20 == 0:
-            removed = self.db.prune_metrics(self.config.retention_points)
-            if removed:
-                log.info("清理了 %d 个过期指标点", removed)
+        self._maybe_prune()
         return report
+
+    # ------------------------------------------------------------------
+    PRUNE_EVERY = 20
+
+    def _maybe_prune(self) -> None:
+        """每 N 轮清理一次过期指标点。
+
+        计数器存在数据库里而不是内存里：`once` 模式（cron / GitHub Actions）
+        每次都是全新进程，内存计数器永远是 1，清理就永远不会触发，
+        数据库会无限膨胀——这个坑只在一次性执行的部署方式下才会暴露。
+        """
+        ticks = int(self.db.kv_get("pipeline_ticks", 0) or 0) + 1
+        self.db.kv_set("pipeline_ticks", ticks)
+        if ticks % self.PRUNE_EVERY:
+            return
+        removed = self.db.prune_metrics(self.config.retention_points)
+        if removed:
+            log.info("第 %d 轮：清理了 %d 个过期指标点", ticks, removed)
 
     # ------------------------------------------------------------------
     def _persist(self, result: CollectResult, report: TickReport) -> list[str]:
@@ -149,6 +162,7 @@ class Pipeline:
         alerted: list[Opportunity] = []
         for opportunity in opportunities:
             ok, reason = should_alert(self.config, self.db, opportunity)
+            opportunity.skip_reason = "" if ok else reason
             payload = _payload(opportunity, alerted=ok, skip_reason=reason)
             opportunity_id = self.db.save_opportunity(opportunity.entity.key, payload)
 

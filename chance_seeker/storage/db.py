@@ -262,6 +262,19 @@ class Database:
         ).fetchall()
         return [r["metric"] for r in rows]
 
+    def entities_with_metric(self, metric: str, within_seconds: int = 86_400) -> list[str]:
+        """历史上记录过某个指标的实体。
+
+        用来给「榜单类」信号补零：只有把「掉出榜单」也记成一个点，
+        「进入榜单」才会在时间序列上表现为跃升，否则榜上的币每轮都触发。
+        """
+        rows = self.conn.execute(
+            """SELECT DISTINCT e.key FROM metrics m JOIN entities e ON e.id = m.entity_id
+                WHERE m.metric = ? AND m.ts >= ?""",
+            (metric, now_ts() - within_seconds),
+        ).fetchall()
+        return [r["key"] for r in rows]
+
     def prune_metrics(self, keep_points: int = 1500) -> int:
         """按实体+指标保留最近 N 个点，控制 SQLite 文件体积。"""
         # metrics 是 WITHOUT ROWID 表，只能用主键三元组来定位要删的行
@@ -465,6 +478,11 @@ class Database:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value, ts = excluded.ts",
             (key, json.dumps(value, ensure_ascii=False), now_ts()),
         )
+        self.conn.commit()
+
+    def vacuum(self) -> None:
+        """回收删除后留下的空页。清理只是把行标记为可用，文件体积不会自己变小。"""
+        self.conn.execute("VACUUM")
         self.conn.commit()
 
     def stats(self) -> dict[str, int]:

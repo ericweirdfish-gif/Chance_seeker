@@ -87,3 +87,5 @@ class Opportunity:
     metrics: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     ts: int = field(default_factory=now_ts)
+    # 为什么没有推送（分数不够 / 未过过滤 / 冷却中 / 风险否决），空串表示已推送
+    skip_reason: str = ""

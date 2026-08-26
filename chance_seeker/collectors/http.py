@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -101,7 +102,7 @@ class HttpClient:
                 continue
 
             if resp.status_code >= 400:
-                log.warning("[%s] HTTP %s from %s: %s", self.name, resp.status_code, url, resp.text[:200])
+                log.warning("[%s] HTTP %s from %s: %s", self.name, resp.status_code, url, _brief(resp))
                 return None
 
             try:
@@ -110,6 +111,24 @@ class HttpClient:
                 log.warning("[%s] 响应不是合法 JSON: %s", self.name, resp.text[:200])
                 return None
         return None
+
+
+_HTML_RE = re.compile(r"<[^>]+>")
+
+
+def _brief(resp: requests.Response) -> str:
+    """错误响应体压成一行短摘要。
+
+    被拦截时（比如 Reddit 的 403）返回的是整页 HTML，原样打进日志会把
+    有用信息淹掉，所以先剥标签再截断。
+    """
+    content_type = resp.headers.get("Content-Type", "")
+    body = resp.text or ""
+    if "html" in content_type.lower() or body.lstrip()[:1] == "<":
+        body = _HTML_RE.sub(" ", body)
+        body = " ".join(body.split())
+        return f"(HTML {len(resp.text)}B) {body[:120]}"
+    return " ".join(body.split())[:200]
 
 
 def _retry_after(resp: requests.Response) -> float | None:

@@ -71,10 +71,12 @@ def cmd_once(args: argparse.Namespace) -> int:
             f"采集器 {','.join(report.ran) or '无'} ｜ 实体 {report.entities} ｜ 指标 {report.observations} "
             f"｜ 信号 {report.signals} ｜ 机会 {len(report.opportunities)} ｜ 告警 {len(report.alerted)}"
         )
-        for opportunity in report.opportunities[: args.top]:
-            from chance_seeker.alerts.renderer import summary_line
+        from chance_seeker.alerts.renderer import summary_line
 
-            print("  " + summary_line(opportunity))
+        for opportunity in report.opportunities[: args.top]:
+            # 带上未推送的原因，否则看到一串没告警的候选完全不知道被什么拦下了
+            suffix = f"  ← {opportunity.skip_reason}" if opportunity.skip_reason else "  ← 已推送"
+            print("  " + summary_line(opportunity) + suffix)
         if report.errors:
             print("错误：" + json.dumps(report.errors, ensure_ascii=False))
             return 1
@@ -135,6 +137,23 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 # -------------------------------------------------------------------- probe
+def cmd_prune(args: argparse.Namespace) -> int:
+    """清理过期指标点。GitHub Actions 缓存数据库前跑一下，控制体积。"""
+    config, db = _open(args)
+    with db:
+        before = config.db_path.stat().st_size if config.db_path.exists() else 0
+        keep = args.keep or config.retention_points
+        removed = db.prune_metrics(keep)
+        if args.vacuum:
+            db.vacuum()
+        after = config.db_path.stat().st_size if config.db_path.exists() else 0
+        print(
+            f"清理了 {removed} 个指标点（每个序列保留最近 {keep} 个）"
+            f"｜体积 {before / 1024:.0f}KB → {after / 1024:.0f}KB"
+        )
+    return 0
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """逐个数据源探活，告诉你哪些能用、哪些缺 key。"""
     from chance_seeker.pipeline import build_collectors
@@ -289,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_top.set_defaults(func=cmd_top)
 
     sub.add_parser("stats", help="数据库统计").set_defaults(func=cmd_stats)
+
+    p_prune = sub.add_parser("prune", help="清理过期指标点，控制数据库体积")
+    p_prune.add_argument("--keep", type=int, help="每个序列保留多少个点，默认取配置值")
+    p_prune.add_argument("--vacuum", action="store_true", help="同时 VACUUM 回收磁盘空间")
+    p_prune.set_defaults(func=cmd_prune)
     p_probe = sub.add_parser("probe", help="探活所有数据源")
     p_probe.add_argument("--schema", action="store_true", help="打印真实响应结构并核对解析器依赖的字段")
     p_probe.add_argument("--samples", type=int, default=2, help="每个数据源打印几个采样值")

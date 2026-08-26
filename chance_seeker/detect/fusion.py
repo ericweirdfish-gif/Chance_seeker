@@ -138,8 +138,14 @@ def passes_filters(config: Config, entity: Entity, metrics: dict[str, float]) ->
 
     min_age = float(filters.get("min_age_minutes", 0) or 0)
     age = metrics.get("age_minutes")
-    if min_age and age is not None and age < min_age:
-        return False, f"上线 {age:.0f} 分钟 < {min_age:.0f} 分钟（太新，先观察）"
+    if min_age:
+        if age is None:
+            # 年龄未知时不能当成「通过」——那等于让 min_age_minutes 静默失效。
+            # 默认仍然放行（否则数据源一变就全线拦死），但这是一个显式选择。
+            if not filters.get("allow_unknown_age", True):
+                return False, "上线时间未知（allow_unknown_age=false）"
+        elif age < min_age:
+            return False, f"上线 {age:.0f} 分钟 < {min_age:.0f} 分钟（太新，先观察）"
 
     max_age_days = float(filters.get("max_age_days", 0) or 0)
     if max_age_days and age is not None and age > max_age_days * 1440:

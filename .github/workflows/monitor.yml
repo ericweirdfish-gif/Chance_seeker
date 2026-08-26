@@ -1,13 +1,31 @@
 name: Monitor
 
-# 免费的定时运行方案。注意两个限制：
-#   1. GitHub 的 cron 最快 5 分钟一次，且高峰期经常延迟几分钟，实时性不如本地常驻
-#   2. 每次运行都是全新容器，所以要用 cache 把 SQLite 带到下一次运行，
-#      否则每次都是冷启动，算不出基线也就检测不出异常
+# 定时监控。开跑之前先搞清楚三件事：
+#
+# 1) schedule 只在【默认分支】触发。这个工作流不合并到 main 就永远不会自动跑。
+#
+# 2) 免费额度（私有仓库 2000 分钟/月；公开仓库无限）。
+#    实测数据（见 smoke 工作流）：整个 job 约 12 秒，但 Actions 按 job 向上取整
+#    到分钟计费，所以每次算 1 分钟。
+#      每 15 分钟 → 每月约 2900 分钟 → 超额
+#      每 30 分钟 → 每月约 1460 分钟 → 占额度 73%，安全      ← 默认
+#      每 60 分钟 → 每月约  730 分钟 → 占额度 37%
+#    仓库设为公开则不受此限，可以直接改成 */10 甚至 */5。
+#
+# 3) 每次运行都是全新容器，靠 actions/cache 把 SQLite 带到下一次。
+#    没有缓存就没有历史基线，统计类规则永远不会触发。
+
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
+    inputs:
+      log_level:
+        description: 日志级别
+        required: false
+        default: INFO
+        type: choice
+        options: [INFO, DEBUG]
 
 concurrency:
   group: monitor
@@ -16,7 +34,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -24,14 +42,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements.txt
 
+      # 用 requirements.txt 而不是 `pip install -e .`：跳过构建 wheel，
+      # 配合 pip 缓存实测 2 秒装完
       - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
+        run: pip install -r requirements.txt --quiet
 
-      # cache 的 key 每次都不同（这样才能写入新版本），
-      # restore-keys 用前缀匹配捞回上一次的数据库
+      # key 每次都不同（缓存条目不可变，必须换 key 才能写入），
+      # restore-keys 用前缀匹配捞回上一次的库
       - name: 取回上一次的数据库
         uses: actions/cache@v4
         with:
@@ -55,13 +74,25 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python -m chance_seeker once
+        run: python -m chance_seeker --log-level "${{ inputs.log_level || 'INFO' }}" once
 
-      - name: 上传数据库快照
+      # 缓存条目要占仓库 10GB 配额，任由数据库长大迟早会把 pip 缓存挤掉。
+      # 压缩前先把过期指标点清掉，并汇报体积。
+      - name: 压实数据库
+        run: |
+          python -m chance_seeker prune --vacuum
+          echo "数据库体积: $(du -h data/chance.db | cut -f1)"
+
+      - name: 写入运行摘要
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: chance-db-${{ github.run_id }}
-          path: data/chance.db
-          retention-days: 7
-          if-no-files-found: warn
+        run: |
+          {
+            echo "### Chance Seeker"
+            echo ""
+            python -m chance_seeker stats 2>/dev/null || echo "（统计不可用）"
+            echo ""
+            echo "近期机会："
+            echo '```'
+            python -m chance_seeker top --top 10 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

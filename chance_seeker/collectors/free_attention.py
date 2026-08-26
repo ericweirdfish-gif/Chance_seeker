@@ -80,12 +80,14 @@ class FreeAttentionCollector(Collector):
 
         ts = now_ts()
         symbol_index = self._symbol_index()
+        scored: set[str] = set()
+
         for rank, wrapper in enumerate(coins):
             item = (wrapper or {}).get("item") if isinstance(wrapper, dict) else None
             if not isinstance(item, dict):
                 continue
             symbol = str(item.get("symbol") or "").upper()
-            # 排名越靠前分数越高：第 1 名 = 15 分，第 15 名 = 1 分
+            # 排名越靠前分数越高：第 1 名 = 16 分，第 15 名 = 2 分
             trending_score = max(1.0, 16.0 - rank)
 
             slug = str(item.get("id") or symbol.lower())
@@ -103,6 +105,18 @@ class FreeAttentionCollector(Collector):
                 point = self.obs(key, "coingecko_trending_score", trending_score, ts)
                 if point:
                     result.observations.append(point)
+                    scored.add(key)
+
+        # 关键一步：给「掉出榜单」的实体补一个 0。
+        # 不补零的话，榜上每个币每轮都是同一个值，任何基于变化的规则都失效，
+        # 而基于绝对值的规则会让 BTC / ETH 这种常驻榜单的币每轮都触发信号。
+        # 补零之后，「进入榜单」才在时间序列上表现成 0 → 16 的跃升。
+        for key in self.db.entities_with_metric("coingecko_trending_score", within_seconds=86_400):
+            if key in scored:
+                continue
+            point = self.obs(key, "coingecko_trending_score", 0.0, ts)
+            if point:
+                result.observations.append(point)
         return result
 
     # ------------------------------------------------------------- Reddit
@@ -118,9 +132,11 @@ class FreeAttentionCollector(Collector):
 
         counts: dict[str, int] = {}
         ts = now_ts()
+        failures = 0
         for sub in subs:
             payload = self.http.get_json(REDDIT_NEW.format(sub=sub), params={"limit": 100})
             if not isinstance(payload, dict):
+                failures += 1
                 continue
             children = ((payload.get("data") or {}).get("children")) or []
             for child in children:
@@ -131,6 +147,15 @@ class FreeAttentionCollector(Collector):
                 for symbol in _extract_symbols(text):
                     for entity_key in symbol_index.get(symbol, ()):
                         counts[entity_key] = counts.get(entity_key, 0) + 1
+
+        if failures == len(subs):
+            log.warning(
+                "[free_attention] Reddit 全部 %d 个子版块请求失败。Reddit 会拦截数据中心 IP，"
+                "在 GitHub Actions 和多数 VPS 上这个源不可用（本地家宽通常可以）。"
+                "建议从 collectors.free_attention.sources 里去掉 reddit。",
+                len(subs),
+            )
+            return result
 
         for entity_key, count in counts.items():
             point = self.obs(entity_key, "reddit_mentions", count, ts)

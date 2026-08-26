@@ -12,6 +12,13 @@ log = logging.getLogger(__name__)
 BASE = "https://api.dexscreener.com"
 BATCH_SIZE = 30  # DexScreener 单次最多 30 个地址
 
+# 各链上一个稳定存在的代币，只用于 `probe --schema` 探测响应结构
+PROBE_TOKENS = {
+    "solana": "So11111111111111111111111111111111111111112",
+    "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "ethereum": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+}
+
 
 class DexScreenerCollector(Collector):
     """DexScreener：免费、无需 key，是整个资金面的主数据源。
@@ -50,21 +57,22 @@ class DexScreenerCollector(Collector):
                 expected={"[].chainId": "链标识", "[].tokenAddress": "代币地址"},
             ),
             SchemaProbe(
-                title=f"DexScreener search（用来取 {chain} 上一个真实 pair）",
-                url=f"{BASE}/latest/dex/search",
-                params={"q": "SOL"},
+                # 必须打采集器真正用的这个端点。/latest/dex/search 的字段集不一样
+                # （比如它不返回 pairCreatedAt），拿它来核对等于验错了对象。
+                title=f"DexScreener tokens/v1（采集器实际使用的端点，{chain}）",
+                url=f"{BASE}/tokens/v1/{chain}/{PROBE_TOKENS.get(chain, PROBE_TOKENS['solana'])}",
                 expected={
-                    "pairs[].baseToken.address": "代币地址",
-                    "pairs[].baseToken.symbol": "代号",
-                    "pairs[].priceUsd": "价格",
-                    "pairs[].liquidity.usd": "流动性 -> liquidity_usd",
-                    "pairs[].volume.h1": "1h 成交量 -> volume_1h",
-                    "pairs[].volume.m5": "5m 成交量 -> volume_5m",
-                    "pairs[].txns.h1.buys": "1h 买单数 -> buy_sell_ratio_1h",
-                    "pairs[].txns.h1.sells": "1h 卖单数",
-                    "pairs[].priceChange.h1": "1h 涨跌",
-                    "pairs[].marketCap": "市值 -> market_cap_usd（早期加成依赖它）",
-                    "pairs[].pairCreatedAt": "建池时间 -> age_minutes（质量过滤依赖它）",
+                    "[].baseToken.address": "代币地址",
+                    "[].baseToken.symbol": "代号",
+                    "[].priceUsd": "价格",
+                    "[].liquidity.usd": "流动性 -> liquidity_usd",
+                    "[].volume.h1": "1h 成交量 -> volume_1h",
+                    "[].volume.m5": "5m 成交量 -> volume_5m",
+                    "[].txns.h1.buys": "1h 买单数 -> buy_sell_ratio_1h",
+                    "[].txns.h1.sells": "1h 卖单数",
+                    "[].priceChange.h1": "1h 涨跌",
+                    "[].marketCap": "市值 -> market_cap_usd（早期加成依赖它）",
+                    "[].pairCreatedAt": "建池时间 -> age_minutes（质量过滤依赖它）",
                 },
                 max_depth=5,
             ),

@@ -97,7 +97,9 @@ collectors:
   free_attention:
     enabled: true
     interval_seconds: 900
-    sources: [dexscreener_boosts, coingecko_trending, reddit]
+    # reddit 默认不开：Reddit 会拦截数据中心 IP，在 GitHub Actions 和多数 VPS 上
+    # 稳定返回 403。本地家宽跑通常没问题，想用就把 reddit 加回来。
+    sources: [dexscreener_boosts, coingecko_trending]
     reddit_subreddits: [CryptoCurrency, CryptoMoonShots, solana, SatoshiStreetBets]
     google_trends_keywords: []   # 需要 pip install "chance-seeker[trends]"
 
@@ -199,13 +201,18 @@ detect:
       min_value: 50
       weight: 0.5
       label: "DexScreener 推广投放激增"
+    # 注意这里用的是「变化」而不是「绝对值」。用 level 的话，热搜榜上的
+    # BTC / ETH 每一轮都会触发信号——在榜上不是异动，*进入*榜单才是。
+    # 采集器会给掉出榜单的币补 0，所以进榜表现为 0 → 16 的跃升。
     - id: cg_trending
       family: attention
       metric: coingecko_trending_score
-      method: level
-      threshold: 1
-      weight: 0.6
-      label: "进入 CoinGecko 热搜"
+      method: delta_pct
+      threshold: 50.0
+      lookback: 1
+      min_value: 8
+      weight: 0.5
+      label: "新进入 CoinGecko 热搜 / 排名跃升"
     - id: reddit_spike
       family: attention
       metric: reddit_mentions
@@ -268,6 +275,10 @@ score:
 filters:
   min_liquidity_usd: 20000
   min_age_minutes: 20
+  # 拿不到上线时间时是否直接放行。
+  # DexScreener 的部分接口不返回 pairCreatedAt，此时 age_minutes 缺失，
+  # min_age_minutes 会静默失效。设为 false 则「年龄未知」按不通过处理。
+  allow_unknown_age: true
   max_age_days: 0            # 0 = 不限制
   min_volume_24h: 50000
   require_metrics: []

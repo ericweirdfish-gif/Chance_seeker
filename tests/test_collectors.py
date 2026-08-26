@@ -207,3 +207,100 @@ def test_parse_time_formats():
 def test_reddit_symbol_extraction_filters_majors():
     text = "aped into $ALPHA and $BETA today, sold $ETH and $ALL"
     assert _extract_symbols(text) == {"ALPHA", "BETA"}
+
+
+# --------------------------------------------------- 榜单类信号的补零建模
+def test_trending_zero_fills_entities_that_dropped_off(config, db, monkeypatch):
+    """掉出榜单必须记成 0，否则「在榜」和「进榜」在时间序列上无法区分。"""
+    from chance_seeker.collectors.free_attention import FreeAttentionCollector
+    from chance_seeker.models import KIND_NARRATIVE
+
+    collector = FreeAttentionCollector(config, db)
+
+    def trending(names):
+        return {"coins": [{"item": {"id": n, "symbol": n.upper(), "name": n}} for n in names]}
+
+    # 第一轮：A、B 在榜
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: trending(["aaa", "bbb"]))
+    first = collector._coingecko()
+    for entity in first.entities:
+        db.upsert_entity(entity)
+    db.record(first.observations)
+    assert metrics_of(first, "narrative:cg-aaa")["coingecko_trending_score"] == 16.0
+
+    # 第二轮：A 掉出，B 还在，C 新进
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: trending(["bbb", "ccc"]))
+    second = collector._coingecko()
+    values = {o.entity_key: o.value for o in second.observations}
+    assert values["narrative:cg-aaa"] == 0.0, "掉出榜单要补 0"
+    assert values["narrative:cg-bbb"] == 16.0
+    assert values["narrative:cg-ccc"] == 15.0
+    assert any(e.kind == KIND_NARRATIVE for e in second.entities)
+
+
+def test_trending_rule_ignores_permanent_residents(config, db):
+    """BTC 常年在榜不是异动；新币进榜才是。"""
+    from chance_seeker.detect.anomaly import AnomalyEngine
+
+    engine = AnomalyEngine(config, db)
+    rule = next(r for r in config.rules if r.id == "cg_trending")
+
+    resident = [12.0] * 12          # 一直在榜，分数不动
+    newcomer = [0.0] * 11 + [16.0]  # 补零之后，进榜表现为跃升
+
+    assert engine.evaluate_rule("k", rule, resident) is None
+    signal = engine.evaluate_rule("k", rule, newcomer)
+    assert signal is not None and signal.score > 0
+
+
+def test_trending_rule_ignores_low_ranks(config, db):
+    """榜尾进出太频繁，min_value 把它们挡在外面。"""
+    from chance_seeker.detect.anomaly import AnomalyEngine
+
+    engine = AnomalyEngine(config, db)
+    rule = next(r for r in config.rules if r.id == "cg_trending")
+    assert engine.evaluate_rule("k", rule, [0.0] * 11 + [3.0]) is None
+
+
+def test_reddit_all_failures_logs_one_clear_warning(config, db, monkeypatch, caplog):
+    from chance_seeker.collectors.free_attention import FreeAttentionCollector
+
+    db.upsert_entity(Entity(kind="token", key="token:solana:a", chain="solana", address="a", symbol="ALPHA"))
+    collector = FreeAttentionCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: None)
+
+    with caplog.at_level("WARNING"):
+        result = collector._reddit()
+    assert not result.observations
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("数据中心 IP" in m for m in messages)
+    assert len([m for m in messages if "Reddit" in m]) == 1, "只应有一条汇总告警，不是每个子版块一条"
+
+
+def test_geckoterminal_derives_age_from_pool_created_at(config, db, fixtures_dir, monkeypatch):
+    """DexScreener 的部分端点不返回建池时间，GeckoTerminal 的必须补上。"""
+    from chance_seeker.collectors.geckoterminal import GeckoTerminalCollector
+
+    collector = GeckoTerminalCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: load(fixtures_dir, "geckoterminal_pools.json"))
+    result = collector._fetch("solana", "solana", "new_pools", 1)
+    key = Entity.token_key("solana", "Tok4444444444444444444444444444444444444")
+    assert metrics_of(result, key)["age_minutes"] > 0
+
+
+def test_http_error_body_is_stripped_of_html():
+    """403 拦截页会返回整页 HTML，原样打日志会把有用信息淹掉。"""
+    from chance_seeker.collectors.http import _brief
+
+    class FakeResponse:
+        headers = {"Content-Type": "text/html"}
+        text = "<html><head><style>.a{--x:1}</style></head><body><h1>Blocked</h1></body></html>"
+
+    brief = _brief(FakeResponse())
+    assert "<" not in brief and "Blocked" in brief and brief.startswith("(HTML ")
+
+    class JsonResponse:
+        headers = {"Content-Type": "application/json"}
+        text = '{"error": "rate limited"}'
+
+    assert _brief(JsonResponse()) == '{"error": "rate limited"}'
