@@ -74,9 +74,24 @@ def _fmt_measure(signal) -> str:
     return ""
 
 
+def short_name(entity) -> str:
+    """代号 → 名称 → 缩写地址。
+
+    从 boosts / profiles 发现的代币在第一次详细轮询之前是没有代号的，
+    直接打整条实体 key 会把一行日志撑满且没法读。
+    """
+    if entity.symbol:
+        return entity.symbol
+    if entity.name:
+        return entity.name
+    if entity.address and len(entity.address) > 14:
+        return f"{entity.address[:6]}…{entity.address[-4:]}"
+    return entity.address or entity.key
+
+
 def summary_line(opportunity: Opportunity) -> str:
     entity = opportunity.entity
-    name = entity.symbol or entity.name or entity.key
+    name = short_name(entity)
     chain = f"[{entity.chain}]" if entity.chain else ""
     return (
         f"{_score_icon(opportunity.score)} {opportunity.score:.0f} 分 {chain} {name} "
@@ -96,7 +111,7 @@ def render_markdown(opportunity: Opportunity) -> str:
     """给 Telegram / Discord / 终端共用的正文。"""
     entity = opportunity.entity
     metrics = opportunity.metrics
-    name = entity.symbol or entity.name or entity.key
+    name = short_name(entity)
     header = f"{_score_icon(opportunity.score)} **{name}** — 机会分 **{opportunity.score:.0f}**"
     if entity.chain:
         header += f"  `{entity.chain}`"

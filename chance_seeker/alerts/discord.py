@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from chance_seeker.alerts.base import AlertChannel
-from chance_seeker.alerts.renderer import links_for, render_markdown
+from chance_seeker.alerts.renderer import links_for, render_markdown, short_name
 from chance_seeker.models import Opportunity
 
 MAX_LEN = 1900  # Discord embed description 上限 4096，content 上限 2000
@@ -23,7 +23,7 @@ class DiscordChannel(AlertChannel):
 
     def send(self, opportunity: Opportunity) -> None:
         entity = opportunity.entity
-        title = f"{entity.symbol or entity.name or entity.key} — {opportunity.score:.0f} 分"
+        title = f"{short_name(entity)} — {opportunity.score:.0f} 分"
         links = links_for(opportunity)
         embed = {
             "title": title[:250],

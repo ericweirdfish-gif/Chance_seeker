@@ -127,3 +127,17 @@ def test_signal_measure_uses_the_right_unit(config, db):
     assert _fmt_measure(s("delta_pct", -76.1)) == "-76.1%"
     assert _fmt_measure(s("acceleration", 3.2)) == "加速 3.2×"
     assert _fmt_measure(s("level", 3.0)) == ""
+
+
+def test_short_name_falls_back_to_abbreviated_address(config, db):
+    """刚发现、还没拿到代号的代币不该在日志里打出整条实体 key。"""
+    from chance_seeker.alerts.renderer import short_name
+
+    addr = "aeeytijohqt1xejccls3ms3eovgzrz2fvzzyczxepump"
+    bare = Entity(kind="token", key=Entity.token_key("solana", addr), chain="solana", address=addr)
+    assert short_name(bare) == "aeeyti…pump"
+    assert "token:solana:" not in short_name(bare)
+
+    assert short_name(Entity(kind="token", key="k", symbol="ALPHA", name="Alpha")) == "ALPHA"
+    assert short_name(Entity(kind="token", key="k", name="Alpha")) == "Alpha"
+    assert short_name(Entity(kind="narrative", key="narrative:ai")) == "narrative:ai"
