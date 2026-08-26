@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 
-from chance_seeker.collectors.base import Collector, CollectResult
+from chance_seeker.collectors.base import Collector, CollectResult, SchemaProbe
 from chance_seeker.collectors.http import HttpClient
 from chance_seeker.models import KIND_NARRATIVE, KIND_TOKEN, Entity, now_ts
 
@@ -29,6 +29,30 @@ class FreeAttentionCollector(Collector):
     def __init__(self, config, db) -> None:  # type: ignore[no-untyped-def]
         super().__init__(config, db)
         self.http = HttpClient("free_attention", rate_limit=20, period=60.0)
+
+    def schema_probes(self) -> list[SchemaProbe]:
+        return [
+            SchemaProbe(
+                title="CoinGecko /search/trending",
+                url=COINGECKO_TRENDING,
+                expected={
+                    "coins[].item.symbol": "代号，用来挂回代币实体",
+                    "coins[].item.id": "slug",
+                    "coins[].item.name": "名称",
+                },
+                max_depth=4,
+            ),
+            SchemaProbe(
+                title="Reddit r/CryptoCurrency/new",
+                url=REDDIT_NEW.format(sub="CryptoCurrency"),
+                params={"limit": 5},
+                expected={
+                    "data.children[].data.title": "标题，从里面抓 $SYMBOL",
+                    "data.children[].data.selftext": "正文",
+                },
+                max_depth=5,
+            ),
+        ]
 
     def collect(self) -> CollectResult:
         result = CollectResult()

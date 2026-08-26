@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from chance_seeker.collectors.base import Collector, CollectResult
+from chance_seeker.collectors.base import Collector, CollectResult, SchemaProbe
 from chance_seeker.collectors.http import HttpClient
 from chance_seeker.models import KIND_TOKEN, Entity, now_ts
 
@@ -31,6 +31,44 @@ class DexScreenerCollector(Collector):
         self._chain_map = {
             c.dexscreener_chain or c.name: c.name for c in config.enabled_chains()
         }
+
+    def schema_probes(self) -> list[SchemaProbe]:
+        chain = next(iter(self._chain_map), "solana")
+        return [
+            SchemaProbe(
+                title="DexScreener token-boosts/latest",
+                url=f"{BASE}/token-boosts/latest/v1",
+                expected={
+                    "[].chainId": "链标识，用来映射到配置里的链",
+                    "[].tokenAddress": "代币地址",
+                    "[].totalAmount": "累计推广额度 -> dex_boosts 指标",
+                },
+            ),
+            SchemaProbe(
+                title="DexScreener token-profiles/latest",
+                url=f"{BASE}/token-profiles/latest/v1",
+                expected={"[].chainId": "链标识", "[].tokenAddress": "代币地址"},
+            ),
+            SchemaProbe(
+                title=f"DexScreener search（用来取 {chain} 上一个真实 pair）",
+                url=f"{BASE}/latest/dex/search",
+                params={"q": "SOL"},
+                expected={
+                    "pairs[].baseToken.address": "代币地址",
+                    "pairs[].baseToken.symbol": "代号",
+                    "pairs[].priceUsd": "价格",
+                    "pairs[].liquidity.usd": "流动性 -> liquidity_usd",
+                    "pairs[].volume.h1": "1h 成交量 -> volume_1h",
+                    "pairs[].volume.m5": "5m 成交量 -> volume_5m",
+                    "pairs[].txns.h1.buys": "1h 买单数 -> buy_sell_ratio_1h",
+                    "pairs[].txns.h1.sells": "1h 卖单数",
+                    "pairs[].priceChange.h1": "1h 涨跌",
+                    "pairs[].marketCap": "市值 -> market_cap_usd（早期加成依赖它）",
+                    "pairs[].pairCreatedAt": "建池时间 -> age_minutes（质量过滤依赖它）",
+                },
+                max_depth=5,
+            ),
+        ]
 
     # ------------------------------------------------------------------
     def collect(self) -> CollectResult:

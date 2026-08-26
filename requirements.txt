@@ -1,0 +1,6 @@
+# 运行时依赖（只有三个，都是纯 Python 无需编译）。
+# GitHub Actions 里用它而不是 `pip install -e .`，可以跳过构建 wheel 的步骤，
+# 配合 setup-python 的 pip 缓存，安装时间从约 20s 降到 3s 以内。
+requests>=2.31
+PyYAML>=6.0
+python-dotenv>=1.0

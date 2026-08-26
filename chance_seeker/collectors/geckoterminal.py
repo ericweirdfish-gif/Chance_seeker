@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from chance_seeker.collectors.base import Collector, CollectResult
+from chance_seeker.collectors.base import Collector, CollectResult, SchemaProbe
 from chance_seeker.collectors.http import HttpClient
 from chance_seeker.models import KIND_TOKEN, Entity, now_ts
 
@@ -30,6 +30,27 @@ class GeckoTerminalCollector(Collector):
             period=60.0,
             headers={"Accept": "application/json;version=20230302"},
         )
+
+    def schema_probes(self) -> list[SchemaProbe]:
+        chain = next(iter(self.config.enabled_chains()), None)
+        network = (chain.geckoterminal_network or chain.name) if chain else "solana"
+        return [
+            SchemaProbe(
+                title=f"GeckoTerminal {network}/new_pools",
+                url=f"{BASE}/networks/{network}/new_pools",
+                params={"page": 1},
+                expected={
+                    "data[].attributes.address": "池子地址",
+                    "data[].attributes.name": "池子名，用来取代号",
+                    "data[].attributes.reserve_in_usd": "储备 -> gt_reserve_usd",
+                    "data[].attributes.volume_usd.h1": "1h 成交量 -> gt_volume_1h",
+                    "data[].attributes.fdv_usd": "FDV -> gt_fdv_usd",
+                    "data[].attributes.transactions.h1.buyers": "1h 独立买家 -> unique_buyers_1h",
+                    "data[].relationships.base_token.data.id": "基础代币 id，解析成地址",
+                },
+                max_depth=5,
+            ),
+        ]
 
     def collect(self) -> CollectResult:
         result = CollectResult()

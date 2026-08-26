@@ -145,6 +145,10 @@ def cmd_probe(args: argparse.Namespace) -> int:
         if not collectors:
             print("没有任何可用的采集器，检查 config.yaml 里的 collectors.*.enabled")
             return 1
+
+        if args.schema:
+            return _probe_schema(collectors)
+
         failed = 0
         for collector in collectors:
             try:
@@ -155,10 +159,60 @@ def cmd_probe(args: argparse.Namespace) -> int:
                     f"指标 {len(result.observations):>5}"
                     + (f" ｜ {json.dumps(result.notes, ensure_ascii=False)}" if result.notes else "")
                 )
+                for line in _sample_lines(result, args.samples):
+                    print(f"      {line}")
             except Exception as exc:
                 failed += 1
                 print(f"❌ {collector.name:<18} {type(exc).__name__}: {exc}")
         return 1 if failed else 0
+
+
+def _sample_lines(result, limit: int) -> list[str]:
+    """打印几个真实采到的指标值，肉眼就能看出解析是不是错位了。"""
+    if limit <= 0:
+        return []
+    by_entity: dict[str, dict[str, float]] = {}
+    for obs in result.observations:
+        by_entity.setdefault(obs.entity_key, {})[obs.metric] = obs.value
+
+    lines = []
+    for entity_key, metrics in list(by_entity.items())[:limit]:
+        preview = ", ".join(f"{k}={v:,.4g}" for k, v in list(metrics.items())[:6])
+        lines.append(f"{entity_key} → {preview}")
+    return lines
+
+
+def _probe_schema(collectors) -> int:
+    """打印每个数据源的真实响应结构，并核对解析器依赖的字段是否存在。"""
+    from chance_seeker.diagnostics import missing_fields, render
+
+    problems: list[str] = []
+    for collector in collectors:
+        for probe in collector.schema_probes():
+            payload = collector.http.get_json(probe.url, params=probe.params)
+            if payload is None:
+                problems.append(f"{probe.title}: 请求失败或返回非 JSON")
+                print(f"\n===== {probe.title} =====\n❌ 请求失败（URL: {probe.url}）")
+                continue
+
+            print(render(probe.title, payload, max_depth=probe.max_depth))
+            gaps = missing_fields(payload, probe.expected)
+            if gaps:
+                print("❌ 解析器依赖但响应里缺失的字段：")
+                for gap in gaps:
+                    print(f"   - {gap}")
+                problems.extend(f"{probe.title}: 缺 {gap}" for gap in gaps)
+            else:
+                print(f"✅ 解析器依赖的 {len(probe.expected)} 个字段全部存在")
+
+    print("\n" + "=" * 60)
+    if problems:
+        print(f"发现 {len(problems)} 个结构问题：")
+        for problem in problems:
+            print(f"  ❌ {problem}")
+        return 1
+    print("✅ 所有数据源的响应结构与解析器一致")
+    return 0
 
 
 def cmd_test_alert(args: argparse.Namespace) -> int:
@@ -235,7 +289,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_top.set_defaults(func=cmd_top)
 
     sub.add_parser("stats", help="数据库统计").set_defaults(func=cmd_stats)
-    sub.add_parser("probe", help="探活所有数据源").set_defaults(func=cmd_probe)
+    p_probe = sub.add_parser("probe", help="探活所有数据源")
+    p_probe.add_argument("--schema", action="store_true", help="打印真实响应结构并核对解析器依赖的字段")
+    p_probe.add_argument("--samples", type=int, default=2, help="每个数据源打印几个采样值")
+    p_probe.set_defaults(func=cmd_probe)
     sub.add_parser("test-alert", help="向所有告警渠道发一条测试消息").set_defaults(func=cmd_test_alert)
     sub.add_parser("demo", help="灌入合成数据，离线体验完整链路").set_defaults(func=cmd_demo)
 

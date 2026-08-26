@@ -14,6 +14,21 @@ log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
+class SchemaProbe:
+    """一个用来校验线上响应结构的探针。
+
+    ``expected`` 是解析器真正依赖的字段路径 -> 说明；``probe --schema``
+    会拿真实响应逐条核对，字段对不上会直接报出来，而不是等到解析出空值。
+    """
+
+    title: str
+    url: str
+    params: dict[str, Any] | None = None
+    expected: dict[str, str] = field(default_factory=dict)
+    max_depth: int = 4
+
+
+@dataclass(slots=True)
 class CollectResult:
     """一次采集的产出：发现的实体 + 观测到的指标点。"""
 
@@ -65,6 +80,10 @@ class Collector(ABC):
     def preflight(self) -> str | None:
         """返回不为 None 表示无法运行的原因（例如缺 API key）。"""
         return None
+
+    def schema_probes(self) -> list[SchemaProbe]:
+        """`probe --schema` 用来核对线上响应结构的探针，默认没有。"""
+        return []
 
     @abstractmethod
     def collect(self) -> CollectResult:

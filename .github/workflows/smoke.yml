@@ -1,0 +1,79 @@
+name: Smoke
+
+# 真实网络冒烟测试。
+#
+# 单元测试全部离线跑，验证不了「线上 API 的响应结构和解析器是否一致」——
+# 而这恰恰是最容易出错的地方（文档和实现对不上是常态）。
+# 这个工作流在有完整外网的 runner 上打真实接口，把响应结构摊在日志里逐条核对，
+# 顺便量出一次运行到底花多少 Actions 分钟。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安装依赖并计时
+        run: |
+          start=$(date +%s)
+          python -m pip install --upgrade pip --quiet
+          pip install -r requirements.txt --quiet
+          echo "::notice::依赖安装耗时 $(( $(date +%s) - start )) 秒"
+
+      - name: 准备配置
+        run: |
+          mkdir -p data
+          cp config/config.example.yaml config/config.yaml
+
+      # ---- 第一步：响应结构核对，这是这个工作流存在的主要理由 ----
+      - name: 核对线上响应结构
+        id: schema
+        continue-on-error: true
+        run: python -m chance_seeker probe --schema
+
+      # ---- 第二步：真实采集，看能不能采到东西、值合不合理 ----
+      - name: 真实采集探活
+        continue-on-error: true
+        run: python -m chance_seeker probe --samples 3
+
+      # ---- 第三步：跑两轮完整流水线，验证入库和检测路径 ----
+      - name: 第一轮
+        run: |
+          start=$(date +%s)
+          python -m chance_seeker once
+          echo "::notice::单轮 once 耗时 $(( $(date +%s) - start )) 秒"
+
+      - name: 第二轮（验证增量写入与基线积累）
+        run: python -m chance_seeker once
+
+      - name: 数据库统计
+        run: |
+          python -m chance_seeker stats
+          echo "数据库体积: $(du -h data/chance.db | cut -f1)"
+
+      - name: 结构核对结果
+        if: always()
+        run: |
+          if [ "${{ steps.schema.outcome }}" != "success" ]; then
+            echo "::warning::响应结构核对发现问题，展开上面的「核对线上响应结构」步骤查看具体缺失字段"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-db
+          path: data/chance.db
+          retention-days: 3
+          if-no-files-found: warn

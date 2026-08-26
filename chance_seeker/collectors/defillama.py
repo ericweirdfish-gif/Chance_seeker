@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from chance_seeker.collectors.base import Collector, CollectResult
+from chance_seeker.collectors.base import Collector, CollectResult, SchemaProbe
 from chance_seeker.collectors.http import HttpClient
 from chance_seeker.models import KIND_CHAIN, KIND_NARRATIVE, Entity, now_ts
 
@@ -26,6 +26,22 @@ class DefiLlamaCollector(Collector):
     def __init__(self, config, db) -> None:  # type: ignore[no-untyped-def]
         super().__init__(config, db)
         self.http = HttpClient("defillama", rate_limit=30, period=60.0, timeout=45.0)
+
+    def schema_probes(self) -> list[SchemaProbe]:
+        return [
+            SchemaProbe(
+                title="DefiLlama /v2/chains",
+                url="https://api.llama.fi/v2/chains",
+                expected={"[].name": "链名", "[].tvl": "链 TVL -> chain_tvl"},
+                max_depth=3,
+            ),
+            SchemaProbe(
+                title="DefiLlama /stablecoinchains",
+                url="https://stablecoins.llama.fi/stablecoinchains",
+                expected={"[].name": "链名", "[].totalCirculatingUSD": "稳定币流通量 -> chain_stablecoins"},
+                max_depth=3,
+            ),
+        ]
 
     def collect(self) -> CollectResult:
         result = CollectResult()
