@@ -215,6 +215,13 @@ def _probe_schema(collectors) -> int:
                 continue
 
             print(render(probe.title, payload, max_depth=probe.max_depth))
+
+            soft = missing_fields(payload, probe.optional)
+            if soft:
+                print("ℹ️  以下字段缺失，但代码有回退路径，不影响运行：")
+                for gap in soft:
+                    print(f"   - {gap}")
+
             gaps = missing_fields(payload, probe.expected)
             if gaps:
                 print("❌ 解析器依赖但响应里缺失的字段：")
@@ -222,7 +229,7 @@ def _probe_schema(collectors) -> int:
                     print(f"   - {gap}")
                 problems.extend(f"{probe.title}: 缺 {gap}" for gap in gaps)
             else:
-                print(f"✅ 解析器依赖的 {len(probe.expected)} 个字段全部存在")
+                print(f"✅ 解析器依赖的 {len(probe.expected)} 个必需字段全部存在")
 
     print("\n" + "=" * 60)
     if problems:

@@ -42,6 +42,9 @@ collectors:
     interval_seconds: 300
     new_pools_pages: 1
     trending_pools_pages: 1
+    # 新池列表里大量池子储备接近 0（实测有 reserve=0、成交量 4e-05 的），
+    # 它们永远过不了质量过滤，却会挤占观察列表名额。设 0 关闭此过滤。
+    min_reserve_usd: 1000
 
   # 跨链宏观：链 TVL、稳定币市值与净流入（免费，无需 key）
   defillama:

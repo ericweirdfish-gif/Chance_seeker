@@ -71,8 +71,12 @@ class DexScreenerCollector(Collector):
                     "[].txns.h1.buys": "1h 买单数 -> buy_sell_ratio_1h",
                     "[].txns.h1.sells": "1h 卖单数",
                     "[].priceChange.h1": "1h 涨跌",
-                    "[].marketCap": "市值 -> market_cap_usd（早期加成依赖它）",
                     "[].pairCreatedAt": "建池时间 -> age_minutes（质量过滤依赖它）",
+                },
+                optional={
+                    # 包装原生代币（探测用的就是 WSOL）没有市值是正常的，
+                    # 代码里有 marketCap -> fdv -> gt_fdv_usd 三级回退
+                    "[].marketCap": "市值 -> market_cap_usd，缺失时回退到 fdv",
                 },
                 max_depth=5,
             ),

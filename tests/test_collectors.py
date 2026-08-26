@@ -304,3 +304,53 @@ def test_http_error_body_is_stripped_of_html():
         text = '{"error": "rate limited"}'
 
     assert _brief(JsonResponse()) == '{"error": "rate limited"}'
+
+
+def test_geckoterminal_skips_dust_pools(config, db, fixtures_dir, monkeypatch):
+    """储备接近 0 的池子永远过不了质量过滤，不该占观察列表名额。"""
+    from chance_seeker.collectors.geckoterminal import GeckoTerminalCollector
+
+    payload = load(fixtures_dir, "geckoterminal_pools.json")
+    dust = json.loads(json.dumps(payload["data"][0]))
+    dust["attributes"]["reserve_in_usd"] = "3.5"
+    dust["relationships"]["base_token"]["data"]["id"] = "solana_DustToken111"
+    payload["data"].append(dust)
+
+    collector = GeckoTerminalCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: payload)
+
+    collector.settings["min_reserve_usd"] = 1000
+    keys = {e.key for e in collector._fetch("solana", "solana", "new_pools", 1).entities}
+    assert Entity.token_key("solana", "DustToken111") not in keys
+    assert Entity.token_key("solana", "Tok4444444444444444444444444444444444444") in keys
+
+    collector.settings["min_reserve_usd"] = 0
+    keys = {e.key for e in collector._fetch("solana", "solana", "new_pools", 1).entities}
+    assert Entity.token_key("solana", "DustToken111") in keys
+
+
+def test_schema_probe_optional_fields_are_not_failures(config, db):
+    """有回退路径的字段缺失不能报红，否则报红变成常态就没人看了。"""
+    from chance_seeker.collectors.dexscreener import DexScreenerCollector
+    from chance_seeker.diagnostics import missing_fields
+
+    probe = next(p for p in DexScreenerCollector(config, db).schema_probes() if "tokens/v1" in p.title)
+    assert "[].marketCap" in probe.optional
+    assert "[].marketCap" not in probe.expected
+    assert "[].pairCreatedAt" in probe.expected
+
+    # 只有 fdv 没有 marketCap 的响应（包装原生代币就是这样）不该算失败
+    payload = [{"baseToken": {"address": "a", "symbol": "S"}, "fdv": 100, "pairCreatedAt": 1}]
+    assert missing_fields(payload, {"[].pairCreatedAt": "建池时间"}) == []
+    assert missing_fields(payload, probe.optional)
+
+
+def test_reddit_probe_only_runs_when_reddit_is_enabled(config, db):
+    from chance_seeker.collectors.free_attention import FreeAttentionCollector
+
+    collector = FreeAttentionCollector(config, db)
+    collector.settings["sources"] = ["coingecko_trending"]
+    assert not any("Reddit" in p.title for p in collector.schema_probes())
+
+    collector.settings["sources"] = ["coingecko_trending", "reddit"]
+    assert any("Reddit" in p.title for p in collector.schema_probes())

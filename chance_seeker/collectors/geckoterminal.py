@@ -76,12 +76,20 @@ class GeckoTerminalCollector(Collector):
             return result
 
         ts = now_ts()
+        # 新池列表里有大量储备接近 0 的灰尘池（实测 reserve=0、成交量 4e-05），
+        # 它们永远不可能通过质量过滤，却会挤占观察列表名额和数据库空间
+        min_reserve = float(self.settings.get("min_reserve_usd", 1000) or 0)
+        skipped = 0
+
         for pool in data:
             if not isinstance(pool, dict):
                 continue
             attrs = pool.get("attributes") or {}
             address = _base_token_address(pool, network)
             if not address:
+                continue
+            if min_reserve and _num(attrs.get("reserve_in_usd")) < min_reserve:
+                skipped += 1
                 continue
 
             key = Entity.token_key(chain, address)
@@ -129,6 +137,10 @@ class GeckoTerminalCollector(Collector):
                 point = self.obs(key, metric, value, ts)
                 if point:
                     result.observations.append(point)
+
+        if skipped:
+            log.debug("[geckoterminal] %s/%s 跳过 %d 个储备低于 $%.0f 的灰尘池",
+                      network, endpoint, skipped, min_reserve)
         return result
 
 

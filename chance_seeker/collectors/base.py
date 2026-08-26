@@ -25,6 +25,10 @@ class SchemaProbe:
     url: str
     params: dict[str, Any] | None = None
     expected: dict[str, str] = field(default_factory=dict)
+    # 有回退路径的字段放这里：缺了只提示，不算失败。
+    # 不区分的话，探针会为「代码本来就能处理的情况」持续报红，
+    # 报红一旦变成常态，真正的字段变更就会被忽略掉。
+    optional: dict[str, str] = field(default_factory=dict)
     max_depth: int = 4
 
 

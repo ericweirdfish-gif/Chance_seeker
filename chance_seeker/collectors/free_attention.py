@@ -31,7 +31,8 @@ class FreeAttentionCollector(Collector):
         self.http = HttpClient("free_attention", rate_limit=20, period=60.0)
 
     def schema_probes(self) -> list[SchemaProbe]:
-        return [
+        sources = {str(s).lower() for s in (self.settings.get("sources") or [])}
+        probes = [
             SchemaProbe(
                 title="CoinGecko /search/trending",
                 url=COINGECKO_TRENDING,
@@ -42,17 +43,23 @@ class FreeAttentionCollector(Collector):
                 },
                 max_depth=4,
             ),
-            SchemaProbe(
-                title="Reddit r/CryptoCurrency/new",
-                url=REDDIT_NEW.format(sub="CryptoCurrency"),
-                params={"limit": 5},
-                expected={
-                    "data.children[].data.title": "标题，从里面抓 $SYMBOL",
-                    "data.children[].data.selftext": "正文",
-                },
-                max_depth=5,
-            ),
         ]
+        # Reddit 默认关闭，没启用就别探——否则每次都因为 403 报红，
+        # 报红变成常态之后，真正的问题就没人看了
+        if "reddit" in sources:
+            probes.append(
+                SchemaProbe(
+                    title="Reddit r/CryptoCurrency/new",
+                    url=REDDIT_NEW.format(sub="CryptoCurrency"),
+                    params={"limit": 5},
+                    expected={
+                        "data.children[].data.title": "标题，从里面抓 $SYMBOL",
+                        "data.children[].data.selftext": "正文",
+                    },
+                    max_depth=5,
+                )
+            )
+        return probes
 
     def collect(self) -> CollectResult:
         result = CollectResult()

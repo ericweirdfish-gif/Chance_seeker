@@ -55,7 +55,8 @@ python -m chance_seeker serve         # 另开一个终端跑看板
 | DexScreener | 价格、流动性、成交量、买卖笔数、推广投放 | 免费，无需 key |
 | GeckoTerminal | 新池 / 趋势池发现、独立买家数 | 免费，无需 key |
 | DefiLlama | 链 TVL、稳定币流向、赛道 TVL 轮动 | 免费，无需 key |
-| CoinGecko 热搜 / Reddit | 免费注意力代理 | 免费，无需 key |
+| CoinGecko 热搜 | 免费注意力代理 | 免费，无需 key |
+| Reddit | 免费注意力代理（默认关闭） | 免费，但会拦数据中心 IP，Actions/VPS 上稳定 403 |
 | Etherscan V2 | EVM 聪明钱转账（一个 key 覆盖全部 EVM 链） | 免费档 10 万次/天 |
 | Solana RPC | Solana 聪明钱持仓 | 公共节点免费；建议 Helius 免费档 |
 | **twitterapi.io** | **X 提及量、独立作者、KOL、互动量** | **约 $0.15 / 1000 条推文** |
@@ -72,7 +73,23 @@ X 是唯一花钱的地方。按默认配置（每 15 分钟最多 25 个查询�
 python -m chance_seeker run
 ```
 
-**GitHub Actions 定时**（完全免费）：`.github/workflows/monitor.yml` 已经配好，把 key 填进仓库 Secrets 就行。注意两个限制：cron 最快 5 分钟一次且高峰会延迟；每次都是全新容器，所以用 `actions/cache` 把 SQLite 带到下一次运行——否则每次冷启动都算不出基线，也就检测不出异常。
+**GitHub Actions 定时**：`.github/workflows/monitor.yml` 已经配好，把 key 填进仓库 Secrets 即可。三个必须知道的点：
+
+1. **schedule 只在默认分支触发**——工作流不合并到 `main` 就永远不会自动跑。
+2. **额度**。实测整个 job 约 12 秒，但 Actions 按 job 向上取整到分钟计费，所以每次算 1 分钟。私有仓库免费额度 2000 分钟/月：
+
+   | 频率 | 每月分钟 | 私有仓库 |
+   |------|---------|---------|
+   | 每 15 分钟 | ~2900 | ❌ 超额 |
+   | **每 30 分钟** | **~1460** | **✅ 占 73%（默认）** |
+   | 每 60 分钟 | ~730 | ✅ 占 37% |
+
+   公开仓库 Actions 分钟无限，可以直接调到 `*/10` 甚至 `*/5`。
+3. **状态靠 `actions/cache` 带走 SQLite**，否则每次冷启动都算不出基线。工作流里会在缓存前跑 `prune --vacuum` 压实数据库——缓存条目占仓库 10GB 配额，任由它长大会把 pip 缓存挤掉。
+
+对 meme 币这种分钟级行情，30 分钟一跑只能算兜底；要实时还是本地常驻。Actions 更适合盯宏观和叙事轮动（DefiLlama 那部分本来就是小时级）。
+
+**用 Actions 验证数据源**：`.github/workflows/smoke.yml` 会在有完整外网的 runner 上打真实接口，把响应结构打印出来并核对解析器依赖的字段。本地网络受限（公司网、墙）时，这是最省事的排查方式——推一下分支就能在 Actions 日志里看到每个数据源到底返回了什么。
 
 **VPS**：`python -m chance_seeker run` 配个 systemd 就行，SQLite 单文件无需额外运维。
 
@@ -82,6 +99,8 @@ python -m chance_seeker run
 |------|------|
 | `init` | 生成配置文件和数据库 |
 | `probe` | 逐个数据源探活，缺 key 会明确告诉你 |
+| `probe --schema` | 打印线上响应结构并核对解析器依赖的字段是否存在 |
+| `prune --vacuum` | 清理过期指标点并回收磁盘空间 |
 | `run` | 常驻运行 |
 | `once` | 强制跑一轮就退出（cron / Actions 用） |
 | `detect` | 用已入库的数据重跑检测，**不联网**，调参专用 |
