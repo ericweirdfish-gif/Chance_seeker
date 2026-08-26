@@ -1,0 +1,67 @@
+name: Monitor
+
+# 免费的定时运行方案。注意两个限制：
+#   1. GitHub 的 cron 最快 5 分钟一次，且高峰期经常延迟几分钟，实时性不如本地常驻
+#   2. 每次运行都是全新容器，所以要用 cache 把 SQLite 带到下一次运行，
+#      否则每次都是冷启动，算不出基线也就检测不出异常
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      # cache 的 key 每次都不同（这样才能写入新版本），
+      # restore-keys 用前缀匹配捞回上一次的数据库
+      - name: 取回上一次的数据库
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: chance-seeker-db-${{ github.run_id }}
+          restore-keys: |
+            chance-seeker-db-
+
+      - name: 准备配置
+        run: |
+          mkdir -p data
+          cp config/config.example.yaml config/config.yaml
+
+      - name: 跑一轮
+        env:
+          X_PROVIDER: ${{ secrets.X_PROVIDER }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python -m chance_seeker once
+
+      - name: 上传数据库快照
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chance-db-${{ github.run_id }}
+          path: data/chance.db
+          retention-days: 7
+          if-no-files-found: warn

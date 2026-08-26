@@ -1,0 +1,4 @@
+[
+  {"url": "https://dexscreener.com/solana/x", "chainId": "solana", "tokenAddress": "Tok3333333333333333333333333333333333333", "amount": 100, "totalAmount": 500, "description": "boosted token"},
+  {"url": "https://dexscreener.com/tron/x", "chainId": "tron", "tokenAddress": "TRXtoken", "amount": 10, "totalAmount": 10}
+]
