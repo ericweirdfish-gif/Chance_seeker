@@ -67,7 +67,7 @@ jobs:
       - name: 核对线上响应结构
         id: schema
         continue-on-error: true
-        run: python -m chance_seeker probe --schema
+        run: python -m chance_seeker probe --schema 2>&1 | tee /tmp/schema.log
 
       # ---- 第二步：真实采集，看能不能采到东西、值合不合理 ----
       - name: 真实采集探活
@@ -94,12 +94,18 @@ jobs:
           echo "=== 重点关注的三条链 ==="
           python -m chance_seeker top --top 10 --chain bsc solana robinhood || true
 
+      # 只说「有问题」等于没说——把具体是哪个数据源的哪个字段直接摊在末尾，
+      # 否则每次都要翻几百行 schema dump 才知道发生了什么
       - name: 结构核对结果
         if: always()
         run: |
-          if [ "${{ steps.schema.outcome }}" != "success" ]; then
-            echo "::warning::响应结构核对发现问题，展开上面的「核对线上响应结构」步骤查看具体缺失字段"
+          if [ "${{ steps.schema.outcome }}" = "success" ]; then
+            echo "✅ 所有数据源的响应结构与解析器一致"
+            exit 0
           fi
+          echo "::warning::响应结构核对发现问题，详情如下"
+          sed -n '/^=\{20,\}$/,$p' /tmp/schema.log 2>/dev/null || true
+          grep -E "^(❌|ℹ️)" /tmp/schema.log 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
