@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "solana_pool1",
+      "type": "pool",
+      "attributes": {
+        "address": "GtPool1",
+        "name": "GAMMA / SOL",
+        "pool_created_at": "2026-08-20T10:00:00Z",
+        "reserve_in_usd": "255000.0",
+        "fdv_usd": "3100000.0",
+        "volume_usd": {"m5": "9000.0", "h1": "88000.0", "h24": "740000.0"},
+        "transactions": {"h1": {"buys": 210, "sells": 90, "buyers": 150, "sellers": 60}}
+      },
+      "relationships": {"base_token": {"data": {"id": "solana_Tok4444444444444444444444444444444444444"}}}
+    }
+  ]
+}

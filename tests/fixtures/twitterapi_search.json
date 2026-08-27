@@ -1,0 +1,15 @@
+{
+  "tweets": [
+    {"id": "1", "text": "buying $ALPHA now", "createdAt": "Tue Aug 26 04:00:00 +0000 2026",
+     "author": {"userName": "KolOne", "followers": 120000},
+     "likeCount": 300, "retweetCount": 40, "replyCount": 12, "quoteCount": 5, "viewCount": 90000},
+    {"id": "2", "text": "alpha looks strong", "createdAt": "Tue Aug 26 03:55:00 +0000 2026",
+     "author": {"userName": "randomdegen", "followers": 400},
+     "likeCount": 10, "retweetCount": 1, "replyCount": 0, "quoteCount": 0, "viewCount": 800},
+    {"id": "3", "text": "old tweet", "createdAt": "Mon Aug 25 04:00:00 +0000 2026",
+     "author": {"userName": "olduser", "followers": 10},
+     "likeCount": 1, "retweetCount": 0, "replyCount": 0, "quoteCount": 0, "viewCount": 10}
+  ],
+  "has_next_page": false,
+  "next_cursor": ""
+}

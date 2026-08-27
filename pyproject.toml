@@ -1,0 +1,35 @@
+[project]
+name = "chance-seeker"
+version = "0.1.0"
+description = "加密货币链上资金异动 + X 注意力异动监测，低成本机会发现工具"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+trends = ["pytrends>=4.9"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+chance-seeker = "chance_seeker.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["chance_seeker*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]

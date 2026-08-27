@@ -1,0 +1,303 @@
+# Chance Seeker 配置文件
+# 复制为 config/config.yaml 后按需修改。${VAR} 会从环境变量 / .env 读取。
+
+general:
+  db_path: data/chance.db
+  log_level: INFO
+  # 每轮 pipeline 之间的最小间隔（常驻模式）
+  tick_seconds: 60
+  # 单个实体最多保留多少条时间序列点（超出自动清理）
+  series_retention_points: 1500
+
+chains:
+  solana:
+    enabled: true
+    dexscreener_chain: solana
+    geckoterminal_network: solana
+  base:
+    enabled: true
+    chain_id: 8453
+    dexscreener_chain: base
+    geckoterminal_network: base
+  ethereum:
+    enabled: true
+    chain_id: 1
+    dexscreener_chain: ethereum
+    geckoterminal_network: eth
+
+collectors:
+  # 池子 / 代币的价格、流动性、成交量、买卖笔数（免费，无需 key）
+  dexscreener:
+    enabled: true
+    interval_seconds: 300
+    # 观察池上限：按机会分排序，只对前 N 个实体做详细轮询，控制请求量
+    watchlist_size: 240
+    # 从 boosts / profiles 里发现新代币
+    discover_from_boosts: true
+    discover_from_profiles: true
+
+  # 新池 / 趋势池发现（免费，30 次/分钟）
+  geckoterminal:
+    enabled: true
+    interval_seconds: 300
+    new_pools_pages: 1
+    trending_pools_pages: 1
+    # 新池列表里大量池子储备接近 0（实测有 reserve=0、成交量 4e-05 的），
+    # 它们永远过不了质量过滤，却会挤占观察列表名额。设 0 关闭此过滤。
+    min_reserve_usd: 1000
+
+  # 跨链宏观：链 TVL、稳定币市值与净流入（免费，无需 key）
+  defillama:
+    enabled: true
+    interval_seconds: 3600
+
+  # EVM 聪明钱钱包监控（需要 ETHERSCAN_API_KEY）
+  evm_wallets:
+    enabled: false
+    interval_seconds: 600
+    api_key: ${ETHERSCAN_API_KEY}
+    lookback_minutes: 90
+    wallets: []
+    # 例：
+    # wallets:
+    #   - address: "0x0000000000000000000000000000000000000000"
+    #     label: "smart-money-1"
+    #     chains: [base, ethereum]
+
+  # Solana 聪明钱钱包监控：快照代币余额并做差分，比解析交易便宜得多
+  solana_wallets:
+    enabled: false
+    interval_seconds: 600
+    rpc_url: ${SOLANA_RPC_URL}
+    wallets: []
+    # 例：
+    # wallets:
+    #   - address: "So11111111111111111111111111111111111111112"
+    #     label: "sol-smart-1"
+
+  # X（推特）注意力
+  x_attention:
+    enabled: false
+    provider: ${X_PROVIDER}          # twitterapi_io | socialdata | official_v2 | null
+    api_key: ${X_API_KEY}
+    bearer_token: ${X_BEARER_TOKEN}
+    interval_seconds: 900
+    lookback_minutes: 60
+    # 成本闸门：超过任一上限就停止本周期的 X 请求
+    max_queries_per_run: 25
+    max_queries_per_hour: 80
+    max_queries_per_day: 1200
+    # 每条查询最多取回多少推文（影响按量计费）
+    tweets_per_query: 60
+    # 自动为观察列表里分数最高的 N 个代币生成 $SYMBOL 查询
+    auto_cashtag_top_n: 20
+    # 固定关注的叙事关键词
+    keywords: []
+    # KOL 名单：被这些账号提及权重更高
+    kols: []
+
+  # 免费注意力代理信号（无需 key）
+  free_attention:
+    enabled: true
+    interval_seconds: 900
+    # reddit 默认不开：Reddit 会拦截数据中心 IP，在 GitHub Actions 和多数 VPS 上
+    # 稳定返回 403。本地家宽跑通常没问题，想用就把 reddit 加回来。
+    sources: [dexscreener_boosts, coingecko_trending]
+    reddit_subreddits: [CryptoCurrency, CryptoMoonShots, solana, SatoshiStreetBets]
+    google_trends_keywords: []   # 需要 pip install "chance-seeker[trends]"
+
+# 异常检测规则
+detect:
+  # 计算基线用的滚动窗口长度（数据点个数）
+  window: 48
+  # 少于这么多历史点就不判异常，避免冷启动误报
+  min_samples: 8
+
+  rules:
+    # ---------- 资金面 ----------
+    - id: vol_1h_spike
+      family: capital
+      metric: volume_1h
+      method: robust_z
+      threshold: 3.0
+      min_value: 30000
+      weight: 1.0
+      label: "1h 成交量异常放大"
+    - id: vol_5m_burst
+      family: capital
+      metric: volume_5m
+      method: ratio
+      threshold: 6.0
+      min_value: 8000
+      weight: 0.9
+      label: "5m 成交量脉冲"
+    - id: liq_inflow
+      family: capital
+      metric: liquidity_usd
+      method: delta_pct
+      threshold: 25.0
+      lookback: 6
+      min_value: 20000
+      weight: 0.85
+      label: "流动性快速注入"
+    - id: buy_pressure
+      family: capital
+      metric: buy_sell_ratio_1h
+      method: level
+      threshold: 2.2
+      weight: 0.7
+      label: "1h 买盘显著压过卖盘"
+    - id: smart_money_cluster
+      family: capital
+      metric: smart_money_buyers
+      method: level
+      threshold: 2
+      weight: 1.3
+      label: "多个聪明钱地址同向建仓"
+    - id: mcap_accel
+      family: capital
+      metric: market_cap_usd
+      method: acceleration
+      threshold: 2.0
+      lookback: 6
+      weight: 0.6
+      label: "市值加速上行"
+
+    # ---------- 注意力面 ----------
+    - id: x_mention_spike
+      family: attention
+      metric: x_mentions
+      method: robust_z
+      threshold: 3.0
+      min_value: 8
+      weight: 1.0
+      label: "X 提及量异常"
+    - id: x_author_spread
+      family: attention
+      metric: x_unique_authors
+      method: ratio
+      threshold: 3.0
+      min_value: 6
+      weight: 1.05
+      label: "讨论人数扩散（非单人刷屏）"
+    - id: x_kol_pickup
+      family: attention
+      metric: x_kol_mentions
+      method: level
+      threshold: 2
+      weight: 1.25
+      label: "多个 KOL 同期提及"
+    - id: x_engagement
+      family: attention
+      metric: x_engagement
+      method: robust_z
+      threshold: 3.0
+      min_value: 200
+      weight: 0.7
+      label: "互动量异常"
+    - id: boost_burst
+      family: attention
+      metric: dex_boosts
+      method: delta_pct
+      threshold: 100.0
+      lookback: 3
+      min_value: 50
+      weight: 0.5
+      label: "DexScreener 推广投放激增"
+    # 注意这里用的是「变化」而不是「绝对值」。用 level 的话，热搜榜上的
+    # BTC / ETH 每一轮都会触发信号——在榜上不是异动，*进入*榜单才是。
+    # 采集器会给掉出榜单的币补 0，所以进榜表现为 0 → 16 的跃升。
+    - id: cg_trending
+      family: attention
+      metric: coingecko_trending_score
+      method: delta_pct
+      threshold: 50.0
+      lookback: 1
+      min_value: 8
+      weight: 0.5
+      label: "新进入 CoinGecko 热搜 / 排名跃升"
+    - id: reddit_spike
+      family: attention
+      metric: reddit_mentions
+      method: ratio
+      threshold: 4.0
+      min_value: 3
+      weight: 0.5
+      label: "Reddit 讨论放量"
+
+    # ---------- 风险面（扣分项） ----------
+    - id: wash_trading
+      family: risk
+      metric: vol_liq_ratio_1h
+      method: level
+      threshold: 60.0
+      weight: 1.0
+      label: "成交量/流动性比异常，疑似对敲"
+    - id: liq_drain
+      family: risk
+      metric: liquidity_usd
+      method: delta_pct
+      threshold: -35.0
+      lookback: 3
+      direction: down
+      weight: 1.4
+      label: "流动性快速撤出"
+    - id: sell_pressure
+      family: risk
+      metric: buy_sell_ratio_1h
+      method: level_below
+      threshold: 0.45
+      weight: 0.8
+      label: "卖压主导"
+
+# 打分与告警
+score:
+  weights:
+    capital: 0.55
+    attention: 0.45
+  # 资金面和注意力面在同一时间窗内同时触发时的加成
+  cooccurrence_bonus: 15
+  cooccurrence_window_minutes: 90
+  # 小市值加成（越早期加成越高，0 表示关闭）
+  early_bonus_max: 12
+  early_bonus_mcap_ceiling: 30000000
+  # 风险扣分上限
+  risk_penalty_max: 45
+  # 风险一票否决：扣分达到这个值就直接不告警。
+  # 光靠扣分挡不住——资金和注意力都拉满时，减 45 分仍然过得了阈值，
+  # 而「流动性刚被抽走 80%」这种情况无论多热闹都不该推给你。
+  risk_veto: 30
+  # 达到多少分才推送
+  alert_threshold: 62
+  # 同一实体的冷却时间，避免刷屏
+  cooldown_minutes: 120
+  # 分数比上次告警高多少可以突破冷却
+  cooldown_override_delta: 18
+
+# 质量过滤：不满足就不进入告警（仍会入库）
+filters:
+  min_liquidity_usd: 20000
+  min_age_minutes: 20
+  # 拿不到上线时间时是否直接放行。
+  # DexScreener 的部分接口不返回 pairCreatedAt，此时 age_minutes 缺失，
+  # min_age_minutes 会静默失效。设为 false 则「年龄未知」按不通过处理。
+  allow_unknown_age: true
+  max_age_days: 0            # 0 = 不限制
+  min_volume_24h: 50000
+  require_metrics: []
+
+alerts:
+  console:
+    enabled: true
+  telegram:
+    enabled: false
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+  discord:
+    enabled: false
+    webhook_url: ${DISCORD_WEBHOOK_URL}
+
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 8787

@@ -1,0 +1,42 @@
+[
+  {
+    "chainId": "solana",
+    "dexId": "raydium",
+    "url": "https://dexscreener.com/solana/pair1",
+    "pairAddress": "Pair1111111111111111111111111111111111111",
+    "baseToken": {"address": "Tok1111111111111111111111111111111111111", "name": "Alpha Token", "symbol": "ALPHA"},
+    "quoteToken": {"address": "So11111111111111111111111111111111111111112", "symbol": "SOL"},
+    "priceUsd": "0.0421",
+    "txns": {"m5": {"buys": 30, "sells": 8}, "h1": {"buys": 420, "sells": 120}},
+    "volume": {"h24": 1850000, "h6": 900000, "h1": 320000, "m5": 41000},
+    "priceChange": {"m5": 3.4, "h1": 28.7, "h6": 62.0, "h24": 110.5},
+    "liquidity": {"usd": 410000, "base": 1200000, "quote": 900},
+    "fdv": 8200000,
+    "marketCap": 8200000,
+    "pairCreatedAt": 1735689600000
+  },
+  {
+    "chainId": "solana",
+    "dexId": "orca",
+    "url": "https://dexscreener.com/solana/pair2",
+    "pairAddress": "Pair2222222222222222222222222222222222222",
+    "baseToken": {"address": "Tok1111111111111111111111111111111111111", "name": "Alpha Token", "symbol": "ALPHA"},
+    "quoteToken": {"address": "So11111111111111111111111111111111111111112", "symbol": "SOL"},
+    "priceUsd": "0.0420",
+    "txns": {"h1": {"buys": 40, "sells": 30}},
+    "volume": {"h24": 150000, "h1": 20000, "m5": 3000},
+    "priceChange": {"h1": 27.0},
+    "liquidity": {"usd": 90000},
+    "marketCap": 8200000,
+    "pairCreatedAt": 1735689600000
+  },
+  {
+    "chainId": "solana",
+    "baseToken": {"address": "Tok2222222222222222222222222222222222222", "name": "Beta", "symbol": "BETA"},
+    "priceUsd": "1.5",
+    "txns": {"h1": {"buys": 10, "sells": 0}},
+    "volume": {"h24": 5000, "h1": 500, "m5": 0},
+    "liquidity": {"usd": 12000},
+    "marketCap": 500000
+  }
+]
