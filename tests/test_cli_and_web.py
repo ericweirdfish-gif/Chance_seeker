@@ -199,3 +199,39 @@ def test_prune_command_shrinks_the_database(cwd, capsys):
 
     with Database(config.db_path) as db:
         assert db.stats()["metrics"] == 150
+
+
+def test_top_filters_by_chain(cwd, capsys):
+    """某条链长期没有产出时要能单独查，只看总榜发现不了。"""
+    from chance_seeker.config import load_config
+    from chance_seeker.models import Entity
+
+    config = load_config(cwd / "config" / "config.yaml", root=cwd)
+    with Database(config.db_path) as db:
+        for chain, symbol in (("bsc", "BNBMEME"), ("solana", "SOLMEME"), ("base", "BASEMEME")):
+            key = Entity.token_key(chain, f"{chain}addr")
+            db.upsert_entity(Entity(kind="token", key=key, chain=chain, address=f"{chain}addr", symbol=symbol))
+            db.save_opportunity(key, {"score": 70.0, "capital_score": 70.0, "attention_score": 0.0,
+                                      "risk_penalty": 0.0, "signals": [], "metrics": {}})
+
+    assert main(["top", "--chain", "bsc", "robinhood"]) == 0
+    out = capsys.readouterr().out
+    assert "BNBMEME" in out
+    assert "SOLMEME" not in out and "BASEMEME" not in out
+
+
+def test_stats_breaks_down_by_chain(cwd, capsys):
+    from chance_seeker.config import load_config
+    from chance_seeker.models import Entity
+
+    config = load_config(cwd / "config" / "config.yaml", root=cwd)
+    with Database(config.db_path) as db:
+        for chain in ("bsc", "robinhood"):
+            db.upsert_entity(
+                Entity(kind="token", key=Entity.token_key(chain, "a"), chain=chain, address="a", symbol="X")
+            )
+
+    assert main(["stats"]) == 0
+    out = capsys.readouterr().out
+    assert "按链拆分" in out
+    assert "bsc" in out and "robinhood" in out

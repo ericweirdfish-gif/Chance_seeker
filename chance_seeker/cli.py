@@ -112,7 +112,10 @@ def cmd_detect(args: argparse.Namespace) -> int:
 def cmd_top(args: argparse.Namespace) -> int:
     config, db = _open(args)
     with db:
-        rows = db.recent_opportunities(limit=args.top, min_score=args.min_score)
+        rows = db.recent_opportunities(limit=args.top * 5, min_score=args.min_score)
+        if args.chain:
+            rows = [r for r in rows if r.get("chain") in args.chain]
+        rows = rows[: args.top]
         if not rows:
             print("暂无记录。")
             return 0
@@ -133,6 +136,29 @@ def cmd_stats(args: argparse.Namespace) -> int:
         print(f"数据库: {config.db_path}")
         for key, value in db.stats().items():
             print(f"  {key:<16} {value}")
+
+        # 按链拆开看：某条链长期 0 信号，说明链标识配错了或者阈值卡太死，
+        # 只看总数是发现不了的
+        rows = db.conn.execute(
+            """SELECT e.chain,
+                      COUNT(DISTINCT e.id) AS tokens,
+                      COUNT(DISTINCT s.id) AS signals,
+                      COUNT(DISTINCT o.id) AS opps,
+                      COALESCE(MAX(o.score), 0) AS best
+                 FROM entities e
+                 LEFT JOIN signals s ON s.entity_id = e.id
+                 LEFT JOIN opportunities o ON o.entity_id = e.id
+                WHERE e.kind = 'token' AND e.chain IS NOT NULL
+                GROUP BY e.chain
+                ORDER BY opps DESC, tokens DESC"""
+        ).fetchall()
+        if rows:
+            print("\n按链拆分（代币 / 信号 / 机会 / 最高分）：")
+            for row in rows:
+                print(
+                    f"  {row['chain']:<12} {row['tokens']:>5} / {row['signals']:>5} / "
+                    f"{row['opps']:>5} / {row['best']:.0f}"
+                )
     return 0
 
 
@@ -342,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_top = sub.add_parser("top", help="查看历史机会榜")
     p_top.add_argument("--top", type=int, default=20)
     p_top.add_argument("--min-score", type=float, default=0.0)
+    p_top.add_argument("--chain", nargs="*", help="只看这些链，例如 --chain bsc robinhood")
     p_top.set_defaults(func=cmd_top)
 
     sub.add_parser("stats", help="数据库统计").set_defaults(func=cmd_stats)
