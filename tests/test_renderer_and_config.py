@@ -89,9 +89,20 @@ def test_rules_parsed_with_defaults(config):
 
 
 def test_enabled_chains_and_db_path(config, project):
-    assert {c.name for c in config.enabled_chains()} == {"solana", "base", "ethereum"}
+    enabled = {c.name for c in config.enabled_chains()}
+    assert {"solana", "bsc", "robinhood"} <= enabled, "这三条链是当前监控重点"
+    assert "ethereum" not in enabled, "主网 gas 太贵、meme 稀少，默认关闭"
     assert config.db_path == project / "data" / "chance.db"
     assert config.chains["base"].chain_id == 8453
+    assert config.chains["bsc"].chain_id == 56
+
+
+def test_chain_identifiers_match_what_was_probed(config):
+    """链标识是实测出来的，写错会导致静默采不到数据。"""
+    assert config.chains["bsc"].geckoterminal_network == "bsc"
+    assert config.chains["bsc"].dexscreener_chain == "bsc"
+    assert config.chains["robinhood"].geckoterminal_network == "robinhood"
+    assert config.chains["robinhood"].dexscreener_chain == "robinhood"
 
 
 def test_missing_config_file_raises(tmp_path):
@@ -141,3 +152,35 @@ def test_short_name_falls_back_to_abbreviated_address(config, db):
     assert short_name(Entity(kind="token", key="k", symbol="ALPHA", name="Alpha")) == "ALPHA"
     assert short_name(Entity(kind="token", key="k", name="Alpha")) == "Alpha"
     assert short_name(Entity(kind="narrative", key="narrative:ai")) == "narrative:ai"
+
+
+# --------------------------------------------------- 告警渠道自动启用
+def test_channels_auto_enable_when_credentials_present(config, monkeypatch, caplog):
+    """填了 Secret 却因为 enabled: false 收不到推送，是最常见的坑。"""
+    from chance_seeker.alerts import build_channels
+
+    config.alerts["telegram"].update({"enabled": "auto", "bot_token": "", "chat_id": ""})
+    with caplog.at_level("WARNING"):
+        names = {c.name for c in build_channels(config)}
+    assert "telegram" not in names
+    assert not [r for r in caplog.records if "初始化失败" in r.getMessage()], "缺凭证时不该刷警告"
+
+    config.alerts["telegram"].update({"bot_token": "123:abc", "chat_id": "456"})
+    assert "telegram" in {c.name for c in build_channels(config)}
+
+
+def test_explicit_true_without_credentials_warns_loudly(config, caplog):
+    """显式开启却没凭证是配置错误，必须说出来，否则用户不知道为什么没消息。"""
+    from chance_seeker.alerts import build_channels
+
+    config.alerts["telegram"].update({"enabled": True, "bot_token": "", "chat_id": ""})
+    with caplog.at_level("WARNING"):
+        build_channels(config)
+    assert any("初始化失败" in r.getMessage() for r in caplog.records)
+
+
+def test_explicit_false_stays_off_even_with_credentials(config):
+    from chance_seeker.alerts import build_channels
+
+    config.alerts["discord"].update({"enabled": False, "webhook_url": "https://example.com/hook"})
+    assert "discord" not in {c.name for c in build_channels(config)}

@@ -120,9 +120,25 @@ def _has_cooccurrence(
 
 
 # ------------------------------------------------------------------ 过滤器
+def effective_filters(config: Config, chain: str | None) -> dict:
+    """全局过滤器叠加该链的覆盖值。
+
+    阈值必须按链分档：全新链上流动性 5 万美元的池子可能已经是头部，
+    而在 Solana 上这只是灰尘。用一套全局阈值，要么把新链全部挡死，
+    要么把成熟链的噪音全放进来。
+    """
+    filters = dict(config.filters or {})
+    per_chain = filters.pop("per_chain", None) or {}
+    if chain and isinstance(per_chain, dict):
+        override = per_chain.get(chain) or {}
+        if isinstance(override, dict):
+            filters.update(override)
+    return filters
+
+
 def passes_filters(config: Config, entity: Entity, metrics: dict[str, float]) -> tuple[bool, str]:
     """告警前的质量闸门。不通过的机会仍然入库，只是不打扰你。"""
-    filters = config.filters
+    filters = effective_filters(config, entity.chain)
     if entity.kind != "token":
         return True, ""
 

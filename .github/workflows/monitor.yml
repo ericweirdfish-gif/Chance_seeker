@@ -4,20 +4,19 @@ name: Monitor
 #
 # 1) schedule 只在【默认分支】触发。这个工作流不合并到 main 就永远不会自动跑。
 #
-# 2) 免费额度（私有仓库 2000 分钟/月；公开仓库无限）。
-#    实测数据（见 smoke 工作流）：整个 job 约 12 秒，但 Actions 按 job 向上取整
-#    到分钟计费，所以每次算 1 分钟。
-#      每 15 分钟 → 每月约 2900 分钟 → 超额
-#      每 30 分钟 → 每月约 1460 分钟 → 占额度 73%，安全      ← 默认
-#      每 60 分钟 → 每月约  730 分钟 → 占额度 37%
-#    仓库设为公开则不受此限，可以直接改成 */10 甚至 */5。
+# 2) 额度。本仓库是【公开】的，Actions 分钟数不限，所以频率按数据源限流来定，
+#    而不是按额度。实测整个 job 约 12 秒。
+#      每 10 分钟 → 每天 144 次       ← 默认，对新 meme 币够用
+#      每 5 分钟  → GitHub 允许的最快 cron，但高峰期本来就会延迟到 10 分钟以上
+#    注意：如果仓库改回私有，免费额度只有 2000 分钟/月，按 job 向上取整计费，
+#    这个频率每月约 4400 分钟会直接超额，必须改回 */30。
 #
 # 3) 每次运行都是全新容器，靠 actions/cache 把 SQLite 带到下一次。
 #    没有缓存就没有历史基线，统计类规则永远不会触发。
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       log_level:
@@ -82,6 +81,28 @@ jobs:
         run: |
           python -m chance_seeker prune --vacuum
           echo "数据库体积: $(du -h data/chance.db | cut -f1)"
+
+      # 没配推送凭证的话，工具会照常跑、照常算分，但你什么都收不到。
+      # 这一步把渠道状态写进日志，免得以为在跑其实是个哑巴。
+      - name: 检查推送渠道
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          missing=""
+          [ -z "$TELEGRAM_BOT_TOKEN" ] && missing="$missing TELEGRAM_BOT_TOKEN"
+          [ -z "$TELEGRAM_CHAT_ID" ]   && missing="$missing TELEGRAM_CHAT_ID"
+          [ -z "$DISCORD_WEBHOOK_URL" ] && missing="$missing DISCORD_WEBHOOK_URL"
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            echo "✅ 已配置推送渠道"
+          else
+            echo "::warning::没有配置任何推送渠道，信号只会留在数据库和下面的运行摘要里。"
+            echo "在 仓库 Settings → Secrets and variables → Actions 添加："
+            echo "  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID，或 DISCORD_WEBHOOK_URL"
+          fi
+          [ -n "$missing" ] && echo "未设置的 Secret:$missing" || true
 
       - name: 写入运行摘要
         if: always()

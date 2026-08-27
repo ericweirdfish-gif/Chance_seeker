@@ -354,3 +354,51 @@ def test_reddit_probe_only_runs_when_reddit_is_enabled(config, db):
 
     collector.settings["sources"] = ["coingecko_trending", "reddit"]
     assert any("Reddit" in p.title for p in collector.schema_probes())
+
+
+def test_geckoterminal_derives_volume_per_buyer(config, db, fixtures_dir, monkeypatch):
+    """meme 最典型的假象是成交量大但只有几个地址对敲，人均成交额能直接戳破。"""
+    from chance_seeker.collectors.geckoterminal import GeckoTerminalCollector
+
+    collector = GeckoTerminalCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: load(fixtures_dir, "geckoterminal_pools.json"))
+    key = Entity.token_key("solana", "Tok4444444444444444444444444444444444444")
+    values = metrics_of(collector._fetch("solana", "solana", "new_pools", 1), key)
+    # fixture: h1 成交量 88000，独立买家 150
+    assert values["volume_per_buyer_1h"] == pytest.approx(88_000 / 150)
+
+
+def test_volume_per_buyer_absent_when_no_buyers(config, db, fixtures_dir, monkeypatch):
+    from chance_seeker.collectors.geckoterminal import GeckoTerminalCollector
+
+    payload = load(fixtures_dir, "geckoterminal_pools.json")
+    payload["data"][0]["attributes"]["transactions"]["h1"]["buyers"] = 0
+    collector = GeckoTerminalCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: payload)
+    key = Entity.token_key("solana", "Tok4444444444444444444444444444444444444")
+    assert "volume_per_buyer_1h" not in metrics_of(collector._fetch("solana", "solana", "new_pools", 1), key)
+
+
+def test_meme_rules_separate_organic_from_wash(config, db):
+    """同样的成交量，几十个地址买 vs 三个地址对敲，必须给出相反的判定。"""
+    from chance_seeker.detect.anomaly import AnomalyEngine
+
+    engine = AnomalyEngine(config, db)
+    buyer_rule = next(r for r in config.rules if r.id == "buyer_spread")
+    wash_rule = next(r for r in config.rules if r.id == "few_buyers_high_volume")
+
+    organic = [8.0] * 12 + [60.0]          # 独立买家从 8 涨到 60
+    assert engine.evaluate_rule("k", buyer_rule, organic) is not None
+    # 人均 800 美元，正常
+    assert engine.evaluate_rule("k", wash_rule, [800.0]) is None
+    # 人均 4 万美元 = 三五个地址在对敲
+    assert engine.evaluate_rule("k", wash_rule, [40_000.0]).family == "risk"
+
+
+def test_buyer_spread_ignores_tiny_absolute_counts(config, db):
+    """1 个买家变 4 个是 4 倍，但毫无意义。"""
+    from chance_seeker.detect.anomaly import AnomalyEngine
+
+    engine = AnomalyEngine(config, db)
+    rule = next(r for r in config.rules if r.id == "buyer_spread")
+    assert engine.evaluate_rule("k", rule, [1.0] * 12 + [4.0]) is None

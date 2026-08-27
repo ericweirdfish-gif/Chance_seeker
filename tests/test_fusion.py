@@ -204,3 +204,42 @@ def test_unknown_age_is_an_explicit_choice_not_a_silent_pass(config, db):
     # 有年龄数据时，开关不影响正常判定
     assert passes_filters(config, entity, {**metrics, "age_minutes": 600})[0] is True
     assert passes_filters(config, entity, {**metrics, "age_minutes": 3})[0] is False
+
+
+# --------------------------------------------------- 按链分档的过滤阈值
+def test_per_chain_filters_override_globals(config, db):
+    """新链上 5 万流动性可能已是头部，Solana 上只是灰尘——阈值必须分档。"""
+    from chance_seeker.detect.fusion import effective_filters
+
+    config.filters["min_liquidity_usd"] = 20_000
+    config.filters["per_chain"] = {"robinhood": {"min_liquidity_usd": 2_000, "min_volume_24h": 3_000}}
+
+    assert effective_filters(config, "robinhood")["min_liquidity_usd"] == 2_000
+    assert effective_filters(config, "solana")["min_liquidity_usd"] == 20_000
+    # 覆盖是合并而不是替换：没被覆盖的键要保留全局值
+    assert effective_filters(config, "robinhood")["min_age_minutes"] == config.filters["min_age_minutes"]
+    # per_chain 本身不能泄漏成一个过滤条件
+    assert "per_chain" not in effective_filters(config, "solana")
+
+
+def test_per_chain_filters_applied_end_to_end(config, db):
+    config.filters.update({"min_liquidity_usd": 20_000, "min_volume_24h": 50_000, "min_age_minutes": 0})
+    config.filters["per_chain"] = {"robinhood": {"min_liquidity_usd": 2_000, "min_volume_24h": 3_000}}
+    small = {"liquidity_usd": 5_000, "volume_24h": 8_000}
+
+    rh = Entity(kind="token", key="token:robinhood:x", chain="robinhood", address="x", symbol="RH")
+    sol = Entity(kind="token", key="token:solana:y", chain="solana", address="y", symbol="SOL2")
+    db.upsert_entity(rh)
+    db.upsert_entity(sol)
+
+    assert passes_filters(config, db.get_entity(rh.key), small)[0] is True
+    ok, reason = passes_filters(config, db.get_entity(sol.key), small)
+    assert not ok and "流动性" in reason
+
+
+def test_unknown_chain_falls_back_to_globals(config, db):
+    from chance_seeker.detect.fusion import effective_filters
+
+    config.filters["per_chain"] = {"robinhood": {"min_liquidity_usd": 1}}
+    assert effective_filters(config, "aptos")["min_liquidity_usd"] == config.filters["min_liquidity_usd"]
+    assert effective_filters(config, None)["min_liquidity_usd"] == config.filters["min_liquidity_usd"]

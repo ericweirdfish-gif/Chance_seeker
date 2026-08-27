@@ -30,18 +30,29 @@ def build_channels(config: Config) -> list[AlertChannel]:
 
     registry = {"console": ConsoleChannel, "telegram": TelegramChannel, "discord": DiscordChannel}
     channels: list[AlertChannel] = []
+
     for name, settings in (config.alerts or {}).items():
         settings = settings or {}
-        if not settings.get("enabled"):
+        mode = settings.get("enabled", "auto")
+        if mode is False:
             continue
+
         cls = registry.get(name)
         if cls is None:
             log.warning("未知的告警渠道 %r，忽略", name)
             continue
+
         try:
             channels.append(cls(settings))
+            log.info("告警渠道 %s 已启用", name)
         except ValueError as exc:
-            log.warning("告警渠道 %s 初始化失败：%s", name, exc)
+            # "auto" 表示「有凭证就用」，缺凭证是预期情况，不该刷警告；
+            # 显式写 true 却缺凭证则是配置错误，必须说出来
+            if mode is True:
+                log.warning("告警渠道 %s 已启用但初始化失败：%s", name, exc)
+            else:
+                log.debug("告警渠道 %s 未配置凭证，跳过（%s）", name, exc)
+
     if not channels:
-        log.warning("没有启用任何告警渠道，信号只会写入数据库")
+        log.warning("没有任何告警渠道可用，信号只会写入数据库。检查 .env 里的推送凭证。")
     return channels

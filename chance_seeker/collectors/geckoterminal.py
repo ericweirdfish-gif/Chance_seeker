@@ -129,6 +129,9 @@ class GeckoTerminalCollector(Collector):
                 "unique_sellers_1h": sellers,
                 "buyer_seller_ratio_1h": buyers / sellers if sellers > 0 else (buyers if buyers else None),
                 "age_minutes": age_minutes,
+                # 人均成交额。meme 币最典型的假象是「成交量很大但只有三五个地址在对敲」，
+                # 单看成交量分不出来，除以独立买家数立刻就露馅
+                "volume_per_buyer_1h": _num(volume.get("h1")) / buyers if buyers > 0 else None,
             }
             if endpoint == "trending_pools":
                 points["gt_trending"] = 1.0

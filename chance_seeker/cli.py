@@ -149,13 +149,9 @@ def cmd_chains(args: argparse.Namespace) -> int:
     queries = args.query or []
 
     if args.list:
-        from chance_seeker.chains import list_geckoterminal_networks
-        from chance_seeker.collectors.http import HttpClient
+        from chance_seeker.chains import build_http, list_geckoterminal_networks
 
-        http = HttpClient(
-            "chains", rate_limit=25, period=60.0, headers={"Accept": "application/json;version=20230302"}
-        )
-        networks = list_geckoterminal_networks(http)
+        networks = list_geckoterminal_networks(build_http())
         print(render_network_catalog(networks, grep=queries[0] if queries else None))
         return 0
 

@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from chance_seeker.collectors.http import HttpClient
 
@@ -33,8 +36,52 @@ class ChainSupport:
         return bool(self.geckoterminal_ids or self.dexscreener_ids)
 
 
-def list_geckoterminal_networks(http: HttpClient, max_pages: int = 10) -> list[dict[str, str]]:
-    """GeckoTerminal 支持的全部网络。分页拿完，用来做名称匹配。"""
+CACHE_TTL = 24 * 3600
+
+
+def _cache_path(root: Path | None = None) -> Path:
+    return (root or Path.cwd()) / "data" / "gt_networks.json"
+
+
+def _read_cache(path: Path) -> list[dict[str, str]] | None:
+    if not path.exists():
+        return None
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if time.time() - float(blob.get("ts", 0)) > CACHE_TTL:
+        return None
+    networks = blob.get("networks")
+    return networks if isinstance(networks, list) and networks else None
+
+
+def _write_cache(path: Path, networks: list[dict[str, str]]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"ts": time.time(), "networks": networks}, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError as exc:  # pragma: no cover - 缓存写不进去不影响功能
+        log.debug("网络列表缓存写入失败: %s", exc)
+
+
+def list_geckoterminal_networks(
+    http: HttpClient, max_pages: int = 10, cache_root: Path | None = None, use_cache: bool = True
+) -> list[dict[str, str]]:
+    """GeckoTerminal 支持的全部网络。
+
+    结果落地缓存 24 小时。限流器是进程内的，而 `chains` 命令常常在一分钟里
+    被连续调用多次（每次都是新进程），不缓存就必然撞上 30 次/分钟的限制，
+    拿到一个空列表——而空列表会让所有链都「匹配不到」，比报错还难发现。
+    """
+    path = _cache_path(cache_root)
+    if use_cache:
+        cached = _read_cache(path)
+        if cached:
+            log.debug("使用缓存的网络列表（%d 个）", len(cached))
+            return cached
+
     networks: list[dict[str, str]] = []
     for page in range(1, max_pages + 1):
         payload = http.get_json(GT_NETWORKS, params={"page": page})
@@ -54,8 +101,15 @@ def list_geckoterminal_networks(http: HttpClient, max_pages: int = 10) -> list[d
                     "coingecko_asset_platform_id": str(attrs.get("coingecko_asset_platform_id") or ""),
                 }
             )
-        if len(data) < 20:
+        # 用 links.next 判断是否还有下一页。靠「本页不足 20 条」推断会在
+        # 最后一页刚好满 20 条时多请求一次，触发 400（page 超出范围）
+        if not ((payload.get("links") or {}).get("next")):
             break
+
+    if networks:
+        _write_cache(path, networks)
+    else:
+        log.warning("没能取到 GeckoTerminal 网络列表（可能被限流），链匹配会全部落空")
     return networks
 
 
@@ -127,11 +181,17 @@ def suggest_config(supports: list[ChainSupport]) -> str:
     return "\n".join(lines)
 
 
-def discover(queries: list[str]) -> tuple[list[ChainSupport], list[dict[str, str]]]:
-    http = HttpClient(
+def build_http() -> HttpClient:
+    return HttpClient(
         "chains", rate_limit=25, period=60.0, headers={"Accept": "application/json;version=20230302"}
     )
-    networks = list_geckoterminal_networks(http)
+
+
+def discover(
+    queries: list[str], cache_root: Path | None = None
+) -> tuple[list[ChainSupport], list[dict[str, str]]]:
+    http = build_http()
+    networks = list_geckoterminal_networks(http, cache_root=cache_root)
     return [probe_chain(http, q, networks) for q in queries], networks
 
 
