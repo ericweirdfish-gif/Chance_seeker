@@ -37,6 +37,16 @@ jobs:
           mkdir -p data
           cp config/config.example.yaml config/config.yaml
 
+      # ---- 第零步：链支持情况探测 ----
+      # 配一条链之前必须确认数据源支不支持、标识符叫什么、上面有没有真实交易。
+      # 猜错的后果是「静默采不到数据」，非常难排查。
+      - name: 探测链支持情况
+        continue-on-error: true
+        run: |
+          python -m chance_seeker chains --list robinhood || true
+          echo "----------------------------------------"
+          python -m chance_seeker chains bsc solana robinhood arbitrum || true
+
       # ---- 第一步：响应结构核对，这是这个工作流存在的主要理由 ----
       - name: 核对线上响应结构
         id: schema

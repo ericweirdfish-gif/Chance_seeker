@@ -137,6 +137,40 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 # -------------------------------------------------------------------- probe
+def cmd_chains(args: argparse.Namespace) -> int:
+    """探测某条链在各数据源上的支持情况，并给出可粘贴的配置片段。
+
+    配链之前必须跑一次：链标识猜错的后果是「静默采不到数据」——
+    采集器正常跑、日志正常打，就是一个指标点都没有。
+    """
+    from chance_seeker.chains import discover, render_network_catalog, render_report, suggest_config
+
+    setup_logging(args.log_level or "INFO")
+    queries = args.query or []
+
+    if args.list:
+        from chance_seeker.chains import list_geckoterminal_networks
+        from chance_seeker.collectors.http import HttpClient
+
+        http = HttpClient(
+            "chains", rate_limit=25, period=60.0, headers={"Accept": "application/json;version=20230302"}
+        )
+        networks = list_geckoterminal_networks(http)
+        print(render_network_catalog(networks, grep=queries[0] if queries else None))
+        return 0
+
+    if not queries:
+        print("请给出要探测的链名，例如：chance-seeker chains bsc solana robinhood")
+        return 1
+
+    supports, networks = discover(queries)
+    print(render_report(supports, networks))
+    print("=" * 60)
+    print("建议的配置片段：\n")
+    print(suggest_config(supports))
+    return 0 if all(s.usable for s in supports) else 1
+
+
 def cmd_prune(args: argparse.Namespace) -> int:
     """清理过期指标点。GitHub Actions 缓存数据库前跑一下，控制体积。"""
     config, db = _open(args)
@@ -315,6 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_top.set_defaults(func=cmd_top)
 
     sub.add_parser("stats", help="数据库统计").set_defaults(func=cmd_stats)
+
+    p_chains = sub.add_parser("chains", help="探测链在各数据源上的支持情况")
+    p_chains.add_argument("query", nargs="*", help="要探测的链名，可以给多个")
+    p_chains.add_argument("--list", action="store_true", help="列出数据源支持的全部网络（可用 query 做过滤）")
+    p_chains.set_defaults(func=cmd_chains)
 
     p_prune = sub.add_parser("prune", help="清理过期指标点，控制数据库体积")
     p_prune.add_argument("--keep", type=int, help="每个序列保留多少个点，默认取配置值")
