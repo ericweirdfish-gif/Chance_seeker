@@ -13,6 +13,32 @@ on:
     branches: ["claude/**"]
 
 jobs:
+  # 链支持探测单独一个 job：它的产出是配置决策依据，
+  # 和冒烟日志混在一起会被 schema dump 淹没
+  chains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt --quiet
+      - run: cp config/config.example.yaml config/config.yaml
+
+      - name: 数据源支持的全部网络（按关键词过滤）
+        run: |
+          for word in robinhood bsc binance solana arbitrum; do
+            echo "=== 关键词: $word ==="
+            python -m chance_seeker chains --list "$word" || true
+            echo
+          done
+
+      - name: 逐条链探测并生成配置片段
+        run: python -m chance_seeker chains bsc solana robinhood || true
+
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -36,16 +62,6 @@ jobs:
         run: |
           mkdir -p data
           cp config/config.example.yaml config/config.yaml
-
-      # ---- 第零步：链支持情况探测 ----
-      # 配一条链之前必须确认数据源支不支持、标识符叫什么、上面有没有真实交易。
-      # 猜错的后果是「静默采不到数据」，非常难排查。
-      - name: 探测链支持情况
-        continue-on-error: true
-        run: |
-          python -m chance_seeker chains --list robinhood || true
-          echo "----------------------------------------"
-          python -m chance_seeker chains bsc solana robinhood arbitrum || true
 
       # ---- 第一步：响应结构核对，这是这个工作流存在的主要理由 ----
       - name: 核对线上响应结构
