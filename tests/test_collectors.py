@@ -402,3 +402,21 @@ def test_buyer_spread_ignores_tiny_absolute_counts(config, db):
     engine = AnomalyEngine(config, db)
     rule = next(r for r in config.rules if r.id == "buyer_spread")
     assert engine.evaluate_rule("k", rule, [1.0] * 12 + [4.0]) is None
+
+
+def test_dust_floor_can_be_overridden_per_chain(config, db, fixtures_dir, monkeypatch):
+    """全新链上 500 美元的池子可能已是头部，用主网门槛会把整条链筛空。"""
+    from chance_seeker.collectors.geckoterminal import GeckoTerminalCollector
+
+    payload = load(fixtures_dir, "geckoterminal_pools.json")
+    payload["data"][0]["attributes"]["reserve_in_usd"] = "400"
+    collector = GeckoTerminalCollector(config, db)
+    monkeypatch.setattr(collector.http, "get_json", lambda *a, **k: payload)
+
+    collector.settings["min_reserve_usd"] = 1000
+    collector.settings["per_chain"] = {"robinhood": {"min_reserve_usd": 200}}
+
+    # solana 用全局门槛，400 美元的池子被挡掉
+    assert not collector._fetch("solana", "solana", "new_pools", 1).entities
+    # robinhood 用覆盖值，同一个池子放行
+    assert collector._fetch("robinhood", "robinhood", "new_pools", 1).entities

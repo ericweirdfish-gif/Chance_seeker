@@ -84,20 +84,15 @@ jobs:
       - name: 第二轮（验证增量写入与基线积累）
         run: python -m chance_seeker once
 
-      - name: 数据库统计
-        run: |
-          python -m chance_seeker stats
-          echo "数据库体积: $(du -h data/chance.db | cut -f1)"
-
       # 放在最后：日志 tail 能直接看到本轮结论，不用翻过上面的 schema dump
       - name: 本轮结论
         if: always()
         run: |
-          echo "=== 重点关注的三条链 ==="
-          python -m chance_seeker top --top 12 --chain bsc solana robinhood || true
+          python -m chance_seeker stats
+          echo "数据库体积: $(du -h data/chance.db | cut -f1)"
           echo
-          echo "=== 全部链 ==="
-          python -m chance_seeker top --top 8 || true
+          echo "=== 重点关注的三条链 ==="
+          python -m chance_seeker top --top 10 --chain bsc solana robinhood || true
 
       - name: 结构核对结果
         if: always()

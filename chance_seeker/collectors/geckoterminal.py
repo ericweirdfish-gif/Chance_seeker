@@ -53,6 +53,19 @@ class GeckoTerminalCollector(Collector):
             ),
         ]
 
+    def _setting_for_chain(self, chain: str, key: str, default):
+        """按链取配置，没有覆盖就用全局值。
+
+        灰尘池的门槛必须跟着链走：全新链上储备 500 美元的池子可能是这条链的
+        头部，用主网的 1000 美元门槛会把整条链筛空——而且筛空之后毫无迹象，
+        看起来就像「这条链没有新币」。
+        """
+        per_chain = self.settings.get("per_chain") or {}
+        override = per_chain.get(chain) if isinstance(per_chain, dict) else None
+        if isinstance(override, dict) and key in override:
+            return override[key]
+        return self.settings.get(key, default)
+
     def collect(self) -> CollectResult:
         result = CollectResult()
         new_pages = int(self.settings.get("new_pools_pages", 1))
@@ -78,7 +91,7 @@ class GeckoTerminalCollector(Collector):
         ts = now_ts()
         # 新池列表里有大量储备接近 0 的灰尘池（实测 reserve=0、成交量 4e-05），
         # 它们永远不可能通过质量过滤，却会挤占观察列表名额和数据库空间
-        min_reserve = float(self.settings.get("min_reserve_usd", 1000) or 0)
+        min_reserve = float(self._setting_for_chain(chain, "min_reserve_usd", 1000) or 0)
         skipped = 0
 
         for pool in data:
